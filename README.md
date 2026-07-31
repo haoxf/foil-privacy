@@ -1,8 +1,10 @@
-# Foil Flashcards Privacy Policy
+# Privacy policies
 
-Public privacy policy for Foil Flashcards, hosted with GitHub Pages.
+Public privacy policies for Foil Flashcards and HearTime, hosted with GitHub Pages.
 
 Published URL: <https://haoxf.github.io/foil-privacy/>
+
+HearTime: <https://haoxf.github.io/foil-privacy/heartime/>
 
 ## Publish an update
 
