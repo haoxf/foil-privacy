@@ -26,7 +26,7 @@ if [[ "$(git branch --show-current)" != "$BRANCH" ]]; then
   exit 1
 fi
 
-git add -- index.html README.md publish.sh heartime/index.html heartime/support/index.html
+git add -- index.html README.md publish.sh support/index.html heartime/index.html heartime/support/index.html
 
 if git diff --cached --quiet; then
   echo "Nothing to publish."
@@ -42,3 +42,4 @@ git commit -m "$commit_message"
 git push origin "$BRANCH"
 
 echo "Published: https://haoxf.github.io/foil-privacy/"
+echo "Foil Support: https://haoxf.github.io/foil-privacy/support/"
