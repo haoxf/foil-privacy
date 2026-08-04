@@ -26,14 +26,14 @@ if [[ "$(git branch --show-current)" != "$BRANCH" ]]; then
   exit 1
 fi
 
-git add -- index.html README.md publish.sh
+git add -- index.html README.md publish.sh heartime/index.html heartime/support/index.html
 
 if git diff --cached --quiet; then
   echo "Nothing to publish."
   exit 0
 fi
 
-commit_message="Update Foil privacy policy"
+commit_message="Update Foil public support pages"
 if [[ $# -gt 0 ]]; then
   commit_message="$*"
 fi

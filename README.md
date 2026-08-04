@@ -6,9 +6,11 @@ Published URL: <https://haoxf.github.io/foil-privacy/>
 
 HearTime: <https://haoxf.github.io/foil-privacy/heartime/>
 
+HearTime Support: <https://haoxf.github.io/foil-privacy/heartime/support/>
+
 ## Publish an update
 
-1. Edit `index.html`.
+1. Edit the applicable HTML page.
 2. Run `./publish.sh`.
 
-The script verifies the expected GitHub repository, stages only the privacy-policy files, creates a commit when needed, and pushes the `main` branch.
+The script verifies the expected GitHub repository, stages only the public-site files, creates a commit when needed, and pushes the `main` branch.
