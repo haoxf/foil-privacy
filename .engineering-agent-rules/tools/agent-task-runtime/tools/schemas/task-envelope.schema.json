@@ -1,7 +1,7 @@
 {
   "$id": "https://engineering-agent-rules.local/schemas/agent-task-runtime/task-envelope.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Lean agent task envelope v1",
+  "title": "Lean agent task envelope v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,7 +9,7 @@
     "write_paths", "run_verification", "git_policy", "context", "tickets"
   ],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "task_id": {"$ref": "#/$defs/identifier"},
     "title": {"$ref": "#/$defs/nonEmptyString"},
     "goal": {"$ref": "#/$defs/nonEmptyString"},
@@ -145,8 +145,11 @@
         "stop_conditions": {"$ref": "#/$defs/nonEmptyStringArray"},
         "risk": {
           "type": "object", "additionalProperties": false,
-          "required": ["required_tier"],
-          "properties": {"required_tier": {"enum": ["weak", "medium", "strong"]}}
+          "required": ["required_tier", "reasoning_depth"],
+          "properties": {
+            "required_tier": {"enum": ["weak", "medium", "strong"]},
+            "reasoning_depth": {"enum": ["economy", "standard", "deep", "maximum"]}
+          }
         }
       }
     }

@@ -9,9 +9,9 @@
 
 始终生效：
 
-- 统一模型路由——按能力下限、权威评分与共享额度池选择 writer / Reviewer → `.cursor/rules/nr-agent-model-router-execution-trigger.mdc`
+- 统一模型路由——按能力、深度、评分与额度选择执行端 → `.cursor/rules/nr-agent-model-router-execution-trigger.mdc`
 - 任务运行时路由——强化持久多票对齐与续接 → `.cursor/rules/nr-agent-task-runtime-execution-trigger.mdc`
-- 共享 Agent 工作流——快速/标准/强化三路径、授权边界与审查门槛 → `.cursor/rules/nr-agent-workflow.mdc`
+- 共享 Agent 工作流——三路径、授权边界与审查门槛 → `.cursor/rules/nr-agent-workflow.mdc`
 - 共享编码纪律——先理解和前置真实探针，后做最小可验证改动 → `.cursor/rules/nr-coding-discipline.mdc`
 - Cursor adapter 路由——Codex 优先派发冻结 R1 或有界 R2 叶子；Cursor 防递归 → `.cursor/rules/nr-cursor-agent-adapter-execution-trigger.mdc`
 - 共享 Git 安全规则——保持用户上下文，只提交明确授权的任务改动 → `.cursor/rules/nr-git-workflow.mdc`

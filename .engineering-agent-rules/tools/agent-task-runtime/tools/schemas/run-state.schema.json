@@ -1,7 +1,7 @@
 {
   "$id": "https://engineering-agent-rules.local/schemas/agent-task-runtime/run-state.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Lean agent task state v1",
+  "title": "Lean agent task state v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,7 +9,7 @@
     "active_ticket", "tickets", "initial_snapshot", "baseline_snapshot", "run_result"
   ],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "task_id": {"$ref": "#/$defs/identifier"},
     "task_digest": {"$ref": "#/$defs/digest"},
     "state": {"enum": ["planned", "armed", "active", "complete"]},
@@ -61,7 +61,7 @@
     "review": {
       "type": "object", "additionalProperties": false,
       "required": [
-        "schema_version", "reviewer", "provider", "model", "tier",
+        "schema_version", "reviewer", "provider", "model", "tier", "reasoning_depth",
         "candidate_fingerprint", "conclusion", "findings", "counterexample"
       ],
       "properties": {
@@ -70,6 +70,7 @@
         "provider": {"$ref": "#/$defs/nonEmptyString"},
         "model": {"$ref": "#/$defs/nonEmptyString"},
         "tier": {"enum": ["weak", "medium", "strong"]},
+        "reasoning_depth": {"enum": ["economy", "standard", "deep", "maximum"]},
         "candidate_fingerprint": {"$ref": "#/$defs/digest"},
         "conclusion": {"const": "passed"},
         "findings": {

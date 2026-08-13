@@ -16,9 +16,15 @@ from typing import Any, Callable
 
 import codex_usage
 import cursor_model_selection
-from model_identity import canonical_model_key, receipt_model_key
+from model_identity import (
+    canonical_model_key, effort_from_model_identity, receipt_model_key,
+)
 import model_score_cache
 import quota_cache
+from reasoning_policy import (
+    REASONING_DEPTH_LEVELS, REASONING_DEPTH_NAMES,
+    reasoning_depth_at_least, reasoning_depth_excess, reasoning_depth_for_effort,
+)
 from tier_policy import TIER_LEVELS, TIER_NAMES, tier_at_least
 
 
@@ -33,7 +39,7 @@ TASK_CLASSES = {
     "root_cause",
     "high_risk_review",
 }
-PURPOSES = {"writer", "reviewer"}
+PURPOSES = {"reviewer", "writer"}
 PREFERRED_PROVIDERS = {"auto", "codex", "cursor"}
 SCORE_DIMENSIONS = {
     "overall_score",
@@ -237,6 +243,7 @@ def _cursor_candidates(
                     "tier": "medium",
                     "capability_mode": "adaptive_unscored",
                     "policy_ceiling": "medium",
+                    "reasoning_depth": "economy",
                     "numeric_scores_available": False,
                     "task_score": None,
                     "score_evidence": "adaptive_policy_ceiling_not_benchmark",
@@ -245,6 +252,15 @@ def _cursor_candidates(
             continue
         scored = scores.get(live["canonical_key"])
         if scored is None:
+            continue
+        try:
+            effort = effort_from_model_identity(
+                live["model_id"], live["display_name"]
+            )
+        except ValueError:
+            continue
+        reasoning_depth = reasoning_depth_for_effort(effort)
+        if reasoning_depth is None:
             continue
         task_score = scored.get("task_scores", {}).get(task_class)
         if type(task_score) not in (int, float):
@@ -263,6 +279,8 @@ def _cursor_candidates(
                 "receipt_key": live["receipt_key"],
                 "pool_id": pool_id,
                 "tier": _tier_from_score(float(scored["overall_score"])),
+                "reasoning_depth": reasoning_depth,
+                "reasoning_depth_evidence": "explicit_runtime_effort",
                 "capability_mode": "benchmarked_explicit_model",
                 "numeric_scores_available": True,
                 "task_score": float(task_score),
@@ -285,13 +303,29 @@ _ROLE_TASKS = {
     "spark_worker": {"micro_edit"},
     "bounded_worker": {"bounded_implementation"},
     "strong_worker": {
-        "prototype", "complex_implementation", "root_cause",
+        "bounded_implementation", "prototype", "complex_implementation",
+    },
+    "deep_worker": {
+        "bounded_implementation", "prototype", "complex_implementation",
+    },
+    "strong_reviewer": {
+        "bounded_implementation", "prototype", "complex_implementation",
+        "root_cause", "high_risk_review",
     },
     "critical_reviewer": {
         "bounded_implementation", "prototype", "complex_implementation",
         "root_cause", "high_risk_review",
     },
+    "max_worker": {
+        "bounded_implementation", "prototype", "complex_implementation",
+    },
+    "max_reviewer": {
+        "bounded_implementation", "prototype", "complex_implementation",
+        "root_cause", "high_risk_review",
+    },
 }
+
+_REVIEWER_ROLES = {"strong_reviewer", "critical_reviewer", "max_reviewer"}
 
 
 def _codex_candidates(
@@ -304,12 +338,15 @@ def _codex_candidates(
         name = role["role"]
         if task_class not in _ROLE_TASKS.get(name, set()):
             continue
-        if purpose == "writer" and name == "critical_reviewer":
+        if purpose == "writer" and name in _REVIEWER_ROLES:
             continue
-        if purpose == "reviewer" and name != "critical_reviewer":
+        if purpose == "reviewer" and name not in _REVIEWER_ROLES:
             continue
         spark = name in {"explorer", "spark_worker"}
         tier = "medium" if spark or name == "bounded_worker" else "strong"
+        reasoning_depth = reasoning_depth_for_effort(role["reasoning_effort"])
+        if reasoning_depth is None:
+            continue
         candidate: dict[str, Any] = {
                 "executor": "codex_agent",
                 "role": name,
@@ -317,6 +354,8 @@ def _codex_candidates(
                 "reasoning_effort": role["reasoning_effort"],
                 "pool_id": "codex_spark" if spark else "codex_main",
                 "tier": tier,
+                "reasoning_depth": reasoning_depth,
+                "reasoning_depth_evidence": "frozen_role_effort",
                 "task_score": None,
                 "score_evidence": "frozen_role_contract",
             }
@@ -355,14 +394,14 @@ def _base_rank(candidate: dict[str, Any], *, task_class: str, purpose: str) -> f
     if task_class in {"exploration", "micro_edit"}:
         base = 0.0 if candidate["pool_id"] == "codex_spark" else 20.0 if executor == "cursor_agent" else 40.0
     elif purpose == "reviewer":
-        base = 0.0 if executor == "cursor_agent" else 10.0 if role == "critical_reviewer" else 30.0
+        base = 0.0 if executor == "cursor_agent" else 10.0 if role in _REVIEWER_ROLES else 30.0
     else:
         base = 0.0 if executor == "cursor_agent" else 20.0 if role == "bounded_worker" else 40.0
     return base
 
 
 def recommend(
-    *, task_class: str, required_tier: str, purpose: str,
+    *, task_class: str, required_tier: str, reasoning_depth: str, purpose: str,
     cursor_models: list[dict[str, str]], scorecard: dict[str, Any],
     cursor_quota: dict[str, Any], codex_quota: dict[str, Any],
     codex_roles: list[dict[str, Any]], writer_model: str | None = None,
@@ -373,6 +412,7 @@ def recommend(
     if (
         task_class not in TASK_CLASSES
         or required_tier not in TIER_LEVELS
+        or reasoning_depth not in REASONING_DEPTH_LEVELS
         or purpose not in PURPOSES
         or preferred_provider not in PREFERRED_PROVIDERS
     ):
@@ -383,16 +423,25 @@ def recommend(
         raise ValueError("unknown score dimension")
     if any(type(value) not in (int, float) or not 0 <= value <= 10000 for value in minimums.values()):
         raise ValueError("score minimum must be a finite non-negative number")
-    candidates = _cursor_candidates(cursor_models, scorecard, task_class=task_class)
-    candidates += _codex_candidates(
-        codex_roles, scorecard, task_class=task_class, purpose=purpose
-    )
+    candidates: list[dict[str, Any]] = []
+    if not (task_class == "root_cause" and purpose == "writer"):
+        if task_class != "root_cause":
+            candidates = _cursor_candidates(
+                cursor_models, scorecard, task_class=task_class
+            )
+        candidates += _codex_candidates(
+            codex_roles, scorecard, task_class=task_class, purpose=purpose
+        )
     eligible: list[dict[str, Any]] = []
     for candidate in candidates:
         pool = pools.get(candidate["pool_id"])
         if pool is not None and pool["exhausted"]:
             continue
         if not tier_at_least(candidate["tier"], required_tier):
+            continue
+        if not reasoning_depth_at_least(
+            candidate.get("reasoning_depth"), reasoning_depth
+        ):
             continue
         candidate_scores = candidate.get("scores", {})
         if any(
@@ -403,7 +452,7 @@ def recommend(
             continue
         score = candidate.get("task_score")
         overall_score = candidate.get("overall_score")
-        if candidate.get("numeric_scores_available") is True and (
+        if candidate.get("capability_mode") == "benchmarked_explicit_model" and (
             type(overall_score) not in (int, float)
             or overall_score < TIER_SCORE[required_tier]
         ):
@@ -428,11 +477,15 @@ def recommend(
             {
                 **candidate,
                 "provider": candidate_provider,
+                "reasoning_depth_excess": reasoning_depth_excess(
+                    candidate["reasoning_depth"], reasoning_depth
+                ),
                 "rank": round(rank, 3),
             }
         )
     eligible.sort(
         key=lambda item: (
+            item["reasoning_depth_excess"],
             0
             if preferred_provider == "auto"
             or item["provider"] == preferred_provider
@@ -458,6 +511,7 @@ def recommend(
         "task": {
             "class": task_class,
             "required_tier": required_tier,
+            "reasoning_depth": reasoning_depth,
             "purpose": purpose,
             "minimum_scores": dict(sorted(minimums.items())),
             "preferred_provider": preferred_provider,
@@ -477,14 +531,19 @@ def recommend(
             "fallback_reason": (
                 None
                 if preferred_provider == "auto" or preference_honored
-                else f"no eligible {preferred_provider} candidate satisfied capability, purpose, score, and quota gates"
+                else (
+                    f"no eligible {preferred_provider} candidate at the minimum "
+                    "sufficient reasoning depth satisfied capability, purpose, "
+                    "score, and quota gates"
+                )
             ),
         },
     }
 
 
 def select(
-    *, repo: Path, task_class: str, required_tier: str, purpose: str,
+    *, repo: Path, task_class: str, required_tier: str,
+    reasoning_depth: str, purpose: str,
     writer_model: str | None = None, prefer_fast: bool = False,
     preferred_provider: str = "auto",
     minimum_scores: dict[str, float] | None = None,
@@ -497,6 +556,7 @@ def select(
     result = recommend(
         task_class=task_class,
         required_tier=required_tier,
+        reasoning_depth=reasoning_depth,
         purpose=purpose,
         cursor_models=enabled_models,
         scorecard=model_score_cache.get_scorecard(),
@@ -545,6 +605,10 @@ def _parser() -> argparse.ArgumentParser:
     choose.add_argument("--repo", type=Path, default=Path.cwd())
     choose.add_argument("--task-class", required=True, choices=sorted(TASK_CLASSES))
     choose.add_argument("--required-tier", required=True, choices=TIER_NAMES)
+    choose.add_argument(
+        "--reasoning-depth", required=True, choices=REASONING_DEPTH_NAMES,
+        help="独立推理投入下限；economy/standard/deep/maximum",
+    )
     choose.add_argument("--purpose", required=True, choices=sorted(PURPOSES))
     choose.add_argument("--writer-model")
     choose.add_argument("--prefer-fast", action="store_true")
@@ -614,6 +678,7 @@ def main(argv: list[str] | None = None) -> int:
             repo=arguments.repo,
             task_class=arguments.task_class,
             required_tier=arguments.required_tier,
+            reasoning_depth=arguments.reasoning_depth,
             purpose=arguments.purpose,
             writer_model=arguments.writer_model,
             prefer_fast=arguments.prefer_fast,

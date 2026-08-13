@@ -167,7 +167,7 @@ class RuntimeStore:
         self._check_context(definition)
         task_id = definition["task_id"]
         state = {
-            "schema_version": 1,
+            "schema_version": 2,
             "task_id": task_id,
             "task_digest": model.task_digest(definition),
             "state": "planned",
@@ -336,6 +336,7 @@ class RuntimeStore:
             model.validate_review(
                 review, fingerprint=preview["fingerprint"],
                 required_tier=ticket["risk"]["required_tier"],
+                required_reasoning_depth=ticket["risk"]["reasoning_depth"],
             )
             checks = self._run_checks(ticket["verification"])
             current = candidate.snapshot(self.repository, definition["write_paths"])
@@ -382,6 +383,13 @@ class RuntimeStore:
             model.validate_review(
                 review, fingerprint=preview["fingerprint"],
                 required_tier="strong",
+                required_reasoning_depth=max(
+                    (
+                        ticket["risk"]["reasoning_depth"]
+                        for ticket in definition["tickets"]
+                    ),
+                    key=model._reasoning_policy.REASONING_DEPTH_LEVELS.__getitem__,
+                ),
             )
             checks = self._run_checks(definition["run_verification"])
             current = candidate.snapshot(self.repository, definition["write_paths"])

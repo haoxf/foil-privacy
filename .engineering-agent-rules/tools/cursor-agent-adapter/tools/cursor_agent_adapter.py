@@ -24,6 +24,7 @@ from typing import Any
 SCHEMA_VERSION = 1
 DEFAULT_TIMEOUT_SECONDS = 3600.0
 HEARTBEAT_INTERVAL_SECONDS = 25.0
+MIN_HEARTBEAT_INTERVAL_SECONDS = 0.25
 PROCESS_EXIT_GRACE_SECONDS = 1.0
 STDERR_LIMIT = 1200
 _SAFE_PROGRESS_TOKEN = re.compile(r"^[a-z0-9_]+$")
@@ -32,11 +33,14 @@ _UPPER_REVIEW_MARKER = re.compile(
 )
 
 
-def _review_prompt(prompt: str, required_tier: str) -> str:
+def _review_prompt(
+    prompt: str, required_tier: str, required_reasoning_depth: str
+) -> str:
     return prompt.rstrip() + f"""
 
 ---
-Upper scheduler read-only review (required tier: {required_tier})
+Upper scheduler read-only review (required tier: {required_tier}; required
+reasoning depth: {required_reasoning_depth})
 
 Remain read-only. Inspect the frozen acceptance criteria, actual diff, production
 path and supplied verification. Findings block only for acceptance violations,
@@ -87,7 +91,7 @@ class _ProgressReporter:
             parts.append(f"{key}={rendered}")
         try:
             print(" ".join(parts), file=self._stream, flush=True)
-        except (OSError, ValueError):
+        except (BlockingIOError, OSError, ValueError):
             self._enabled = False
 
     def _once(self, stage: str, **fields: int | bool | str) -> None:
@@ -113,7 +117,9 @@ class _ProgressReporter:
         if now < self._next_heartbeat:
             return
         self._write("heartbeat", attempt=attempt, phase=self._phase)
-        self._next_heartbeat = now + HEARTBEAT_INTERVAL_SECONDS
+        self._next_heartbeat = now + max(
+            HEARTBEAT_INTERVAL_SECONDS, MIN_HEARTBEAT_INTERVAL_SECONDS,
+        )
 
     def process_cleanup(self, reason: str, attempt: int) -> None:
         self._once("process_cleanup", attempt=attempt, reason=reason)
@@ -645,9 +651,14 @@ _model_identity = _load_router_tool(
 _tier_policy = _load_router_tool(
     "tier_policy.py", "_engineering_agent_rules_tier_policy",
 )
+_reasoning_policy = _load_router_tool(
+    "reasoning_policy.py", "_engineering_agent_rules_reasoning_policy",
+)
 _receipt_key_matches = _model_identity.receipt_key_matches
 _tier_names = _tier_policy.TIER_NAMES
 _tier_at_least = _tier_policy.tier_at_least
+_reasoning_depth_names = _reasoning_policy.REASONING_DEPTH_NAMES
+_reasoning_depth_at_least = _reasoning_policy.reasoning_depth_at_least
 
 
 FALLBACKS = {
@@ -734,7 +745,9 @@ def _receipt(**values: Any) -> dict[str, Any]:
 
 def run_cursor(
     *, executable: str | None, repo: Path | str, allowed_write_paths: Sequence[str],
-    required_tier: str, assessed_tier: str, receipt_key: str, prompt: str,
+    required_tier: str, assessed_tier: str,
+    required_reasoning_depth: str, assessed_reasoning_depth: str,
+    receipt_key: str, prompt: str,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     model: str = "auto", model_source: str = "auto",
     quota_pool_id: str = "cursor_first_party",
@@ -748,6 +761,10 @@ def run_cursor(
         raise ValueError("required_tier must be weak, medium, or strong")
     if assessed_tier not in _tier_names:
         raise ValueError("assessed_tier must be weak, medium, or strong")
+    if required_reasoning_depth not in _reasoning_depth_names:
+        raise ValueError("required_reasoning_depth is invalid")
+    if assessed_reasoning_depth not in _reasoning_depth_names:
+        raise ValueError("assessed_reasoning_depth is invalid")
     if type(receipt_key) is not str or not receipt_key:
         raise ValueError("receipt_key must be the non-empty opaque key from the router")
     if not prompt.strip():
@@ -814,7 +831,10 @@ def run_cursor(
     command.extend(("--output-format", "stream-json", "--model", model))
     cursor_env = dict(os.environ if env is None else env)
     cursor_env["GIT_OPTIONAL_LOCKS"] = "0"
-    cursor_prompt = _review_prompt(prompt, required_tier) if operation == "review" else prompt
+    cursor_prompt = (
+        _review_prompt(prompt, required_tier, required_reasoning_depth)
+        if operation == "review" else prompt
+    )
     process = _run_process(
         command, cwd=repo_path, input_text=cursor_prompt,
         timeout_seconds=timeout_seconds, env=cursor_env,
@@ -915,11 +935,16 @@ def run_cursor(
         "requested_model": model, "model_source": source,
         "receipt_key": receipt_key,
         "required_tier": required_tier,
+        "assessed_reasoning_depth": assessed_reasoning_depth,
+        "required_reasoning_depth": required_reasoning_depth,
         "identity_matches": identity_matches,
         "valid": stream["model_receipt_valid"] and identity_matches,
         "sufficient": (
             stream["model_receipt_valid"] and identity_matches
             and _tier_at_least(assessed_tier, required_tier)
+            and _reasoning_depth_at_least(
+                assessed_reasoning_depth, required_reasoning_depth
+            )
         ),
     }
     writes = bool(
@@ -944,7 +969,7 @@ def run_cursor(
     elif process_success and not identity_matches:
         status = "model_receipt_mismatch"
     elif process_success and not tier_receipt["sufficient"]:
-        status = "insufficient_model_tier"
+        status = "insufficient_model_capability"
     elif operation == "review" and changed:
         status = "review_mutated_worktree"
     elif operation == "review" and process_success and stream["review_status"] == "pass":
@@ -999,6 +1024,14 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--allowed-write-path", action="append", required=True, dest="paths")
     run.add_argument("--required-tier", required=True, choices=_tier_names)
     run.add_argument("--assessed-tier", required=True, choices=_tier_names)
+    run.add_argument(
+        "--required-reasoning-depth", required=True,
+        choices=_reasoning_depth_names,
+    )
+    run.add_argument(
+        "--assessed-reasoning-depth", required=True,
+        choices=_reasoning_depth_names,
+    )
     run.add_argument("--receipt-key", required=True)
     run.add_argument("--quota-pool", required=True, choices=("cursor_first_party", "cursor_api"))
     run.add_argument("--model", default="auto")
@@ -1012,6 +1045,14 @@ def _parser() -> argparse.ArgumentParser:
     review.add_argument("--cursor-command")
     review.add_argument("--required-tier", required=True, choices=_tier_names)
     review.add_argument("--assessed-tier", required=True, choices=_tier_names)
+    review.add_argument(
+        "--required-reasoning-depth", required=True,
+        choices=_reasoning_depth_names,
+    )
+    review.add_argument(
+        "--assessed-reasoning-depth", required=True,
+        choices=_reasoning_depth_names,
+    )
     review.add_argument("--receipt-key", required=True)
     review.add_argument("--quota-pool", required=True, choices=("cursor_first_party", "cursor_api"))
     review.add_argument("--model", default="auto")
@@ -1035,6 +1076,8 @@ def main(argv: list[str] | None = None) -> int:
                 allowed_write_paths=(arguments.paths if arguments.command == "run" else []),
                 required_tier=arguments.required_tier,
                 assessed_tier=arguments.assessed_tier,
+                required_reasoning_depth=arguments.required_reasoning_depth,
+                assessed_reasoning_depth=arguments.assessed_reasoning_depth,
                 receipt_key=arguments.receipt_key,
                 quota_pool_id=arguments.quota_pool,
                 prompt=sys.stdin.read(), timeout_seconds=arguments.timeout_seconds,

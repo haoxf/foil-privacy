@@ -19,14 +19,31 @@ def normalise_model_name(value: str) -> str:
 
 def effort_from_model_id(model_id: str) -> str | None:
     tokens = re.split(r"[-_.]+", model_id.casefold())
-    if "max" in tokens:
-        return "max"
-    if "xhigh" in tokens or ("extra" in tokens and "high" in tokens):
-        return "extra high"
-    for effort in ("high", "medium", "low", "minimal", "none"):
-        if effort in tokens:
-            return effort
-    return None
+    efforts: set[str] = set()
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "xhigh":
+            efforts.add("extra high")
+        elif token == "extra" and index + 1 < len(tokens) and tokens[index + 1] == "high":
+            efforts.add("extra high")
+            index += 1
+        elif token in {"max", "high", "medium", "low", "minimal", "none"}:
+            efforts.add(token)
+        index += 1
+    if len(efforts) > 1:
+        raise ValueError("model id contains conflicting reasoning efforts")
+    return next(iter(efforts), None)
+
+
+def effort_from_model_identity(model_id: str, display_name: str) -> str | None:
+    """Return an explicit effort only when id/display evidence is consistent."""
+
+    id_effort = effort_from_model_id(model_id)
+    display_effort = _display_effort(display_name)
+    if id_effort and display_effort and id_effort != display_effort:
+        raise ValueError("model id and display name disagree on reasoning effort")
+    return id_effort or display_effort
 
 
 def canonical_model_key(model_id: str, display_name: str) -> str:
@@ -52,9 +69,7 @@ def _receipt_parts(
     extra_flags: frozenset[str] = frozenset(),
 ) -> str:
     folded = value.casefold()
-    effort = next((label for label in (
-        "extra high", "xhigh", "max", "high", "medium", "minimal", "low", "none",
-    ) if re.search(rf"\b{re.escape(label)}\b", folded)), fallback_effort)
+    effort = _display_effort(value) or fallback_effort
     flags = {
         "fast": re.search(r"\bfast\b", folded) is not None or "fast" in extra_flags,
         "1m": re.search(r"\b1m\b", folded) is not None or "1m" in extra_flags,
@@ -83,12 +98,16 @@ def _runtime_flags(value: str) -> dict[str, bool]:
 
 def _display_effort(value: str) -> str | None:
     folded = value.casefold()
-    for label in (
-        "extra high", "xhigh", "max", "high", "medium", "minimal", "low", "none",
-    ):
-        if re.search(rf"\b{re.escape(label)}\b", folded):
-            return "extra high" if label == "xhigh" else label
-    return None
+    efforts = {
+        ("extra high" if match.group(0).replace("-", " ") in {"extra high", "xhigh"} else match.group(0))
+        for match in re.finditer(
+            r"\b(?:extra[ -]high|xhigh|max|high|medium|minimal|low|none)\b",
+            folded,
+        )
+    }
+    if len(efforts) > 1:
+        raise ValueError("display name contains conflicting reasoning efforts")
+    return next(iter(efforts), None)
 
 
 def receipt_model_key(model_id: str, display_name: str) -> str:
@@ -116,4 +135,7 @@ def receipt_key_matches(expected_key: str, reported_model: str | None) -> bool:
     reported = (reported_model or "").strip()
     if expected_key == "auto":
         return re.fullmatch(r"auto(?:\s*\([^\r\n]*\))?", reported, re.I) is not None
-    return _receipt_parts(reported) == expected_key
+    try:
+        return _receipt_parts(reported) == expected_key
+    except ValueError:
+        return False

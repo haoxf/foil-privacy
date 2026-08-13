@@ -9,7 +9,7 @@ alwaysApply: false
 
 ## 何时派发 writer
 
-R1/R2 在需求、验收、产品/架构选择和根因完成后，只把自然形成、写域可冻结、有直接 oracle、无其他 writer 的叶子交给 Cursor。R0 不为 Cursor 拆票。已有 active runtime ticket 时沿用票面，没有时只临时冻结 `goal`、`acceptance`、`non-goals`、allowed write paths、oracle、required tier、评分最低值、repository/worktree/branch/HEAD 和禁止的 Git/外部动作；不得为了 adapter 新建 runtime。
+R1/R2 在需求、验收、产品/架构选择和根因完成后，只把自然形成、写域可冻结、有直接 oracle、无其他 writer 的叶子交给 Cursor。R0 不为 Cursor 拆票。已有 active runtime ticket 时沿用票面，没有时只临时冻结 `goal`、`acceptance`、`non-goals`、allowed write paths、oracle、required tier、reasoning depth、真实评分最低值、repository/worktree/branch/HEAD 和禁止的 Git/外部动作；不得为了 adapter 新建 runtime。
 
 并发/生命周期、安全/权限/隐私、密码学、持久化/迁移、产品/架构、测试与生产路径不同或根因未明时不能因文件少降档；主 Agent 先冻结判断边界，再由 router 选择合格 Cursor 模型或回退。不得为了弱模型人为拆票或回调评分门槛。
 
@@ -20,6 +20,8 @@ R1/R2 在需求、验收、产品/架构选择和根因完成后，只把自然�
 ```text
 run --repo ROOT --allowed-write-path PATH --required-tier weak|medium|strong
     --assessed-tier weak|medium|strong
+    --required-reasoning-depth economy|standard|deep|maximum
+    --assessed-reasoning-depth economy|standard|deep|maximum
     --receipt-key OPAQUE_ROUTER_KEY
     --quota-pool cursor_first_party|cursor_api
     --model MODEL --model-source auto|third_party|cursor_native
@@ -27,7 +29,7 @@ run --repo ROOT --allowed-write-path PATH --required-tier weak|medium|strong
 
 wrapper 使用 `--print --force --trust --sandbox enabled --output-format stream-json` 前台等待本次进程组；prompt 不进 argv、stdout 或 receipt。根进程成功终态后只留短暂退出宽限，逾期停止本组；收到终态仍不退出视为可能写入失败。简报禁止 commit、切分支、push/PR、扩 scope 和写 runtime。
 
-stderr 只输出固定阶段、计数和每 25 秒心跳；stdout 只输出一份 JSON receipt。不得转发 prompt、模型正文、工具参数、路径、diff 或 Cursor 原始输出。显式模型、来源、`assessed-tier`、opaque `receipt-key` 与 `quota-pool` 必须逐字来自本次 router 的同一 `recommended`；adapter 不维护第二份模型名→tier、模型名→额度池或别名归一化表。system init 形成 model receipt，共享 identity 工具核对失败时 `model_receipt_mismatch`，router 评定 tier 低于要求时 `insufficient_model_tier`。
+stderr 只输出固定阶段、计数和每 25 秒心跳；stdout 只输出一份 JSON receipt。不得转发 prompt、模型正文、工具参数、路径、diff 或 Cursor 原始输出。显式模型、来源、`assessed-tier`、`assessed-reasoning-depth`、opaque `receipt-key` 与 `quota-pool` 必须逐字来自本次 router 的同一 `recommended`；adapter 不维护第二份模型名→tier/depth、模型名→额度池或别名归一化表。system init 形成 model receipt，共享 identity 工具核对失败时 `model_receipt_mismatch`，router 评定 tier 或 depth 低于要求时 `insufficient_model_capability`。
 
 根进程正常退出、唯一成功终态、tier 足够、进程组安静、Git 未漂移且非空 delta 全在 allowed paths，才返回 `candidate_ready` 和 `upper_review_required: true`。这里的 ready 只表示“可交上层审查”，不表示已通过 Review 或可交付。无改动、协议错、非零退出、超时、进程组未安静、HEAD/branch/index/staged 漂移、越界或新 symlink 均不成候选。
 
@@ -38,6 +40,8 @@ router 为稳定候选选择 Cursor Reviewer 时，上层单独调用：
 ```text
 review --repo ROOT --required-tier weak|medium|strong
        --assessed-tier weak|medium|strong
+       --required-reasoning-depth economy|standard|deep|maximum
+       --assessed-reasoning-depth economy|standard|deep|maximum
        --receipt-key OPAQUE_ROUTER_KEY
        --quota-pool cursor_first_party|cursor_api
        --model MODEL --model-source auto|third_party|cursor_native

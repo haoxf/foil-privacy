@@ -13,21 +13,23 @@ router 的结构化候选是一次调度的唯一能力收据：adapter 与上�
 
 选择 writer 或 Reviewer 前，主 Agent 先给出：
 
-- `task-class`：`exploration | micro_edit | bounded_implementation | prototype | complex_implementation | root_cause | high_risk_review`；它约束 Spark/固定角色适用面，不代替评分。
+- `task-class`：`exploration | micro_edit | bounded_implementation | prototype | complex_implementation | root_cause | high_risk_review`；它只描述工作类型并约束角色适用面，不代替能力、推理深度或评分。
+- `root_cause` 只表示根因尚未建立的只读证据调查：writer 必须 fail-closed，reviewer 目的改为调查稳定的故障证据包，而不是审实现 diff；根因建立后按实际改动重分类为 bounded/complex implementation。Cursor adapter 的 review 仅审实现候选，因此 root-cause 只选择 Codex 的只读 reviewer 角色。
 - `required-tier`：`weak | medium | strong` 能力下限。
+- `reasoning-depth`：`economy | standard | deep | maximum` 推理投入下限，与能力 tier 正交。对 Codex 固定角色分别映射到 Medium/Low 一类轻量 effort、High、XHigh、Max；Cursor 显式 variant 只从运行时 model id/display 的一致 effort 证据映射，无显式或冲突 effort 的静态模型 fail-closed 排除，Auto 只记 `economy`。脚本优先选择满足要求的最低深度，不能因 provider 偏好、额度、文件数或普通 strong 标签越级。
 - 零个或多个 `--min-score DIMENSION=MINIMUM`：模型必须逐项达到的机器证据。支持 `overall_score`、`task_score`、`cursorbench`、`deep_swe`、`frontier_code`、`terminal_bench`、`apex_agents`、`aa_intelligence`、`gdpval_aa`、`apex_swe`、`aa_briefcase`、`harvey_lab`。
-- `--prefer-provider auto|codex|cursor`：用户显式 provider 软优先；当前任务中用户说“优先使用 Codex/Cursor”后，后续每次 `select` 都必须传对应值，直到用户更改或取消。偏好只在已通过任务适用面、writer/reviewer、required tier、逐维评分与额度门禁的候选之间改变排序，不能强行选用不合格或已耗尽 provider；回退时收据必须包含 `preference.honored=false` 与机器生成原因。不传时为 `auto`。
+- `--prefer-provider auto|codex|cursor`：用户显式 provider 软优先；当前任务中用户说“优先使用 Codex/Cursor”后，后续每次 `select` 都必须传对应值，直到用户更改或取消。偏好只在已通过任务适用面、writer/reviewer、required tier、reasoning depth、逐维评分与额度门禁，且处于最低充分推理深度的候选之间改变排序，不能强行选用不合格、已耗尽或更深档 provider；回退时收据必须包含 `preference.honored=false` 与机器生成原因。不传时为 `auto`。
 - `purpose=writer|reviewer`；Reviewer 另传 `--writer-model`，脚本会降低同模型优先级，但独立性的硬条件仍是不同 Agent 身份和稳定候选。
 
 ```sh
 python3 .engineering-agent-rules/tools/agent-model-router/tools/agent_model_router.py \
   select --repo . --task-class complex_implementation --required-tier strong \
-  --purpose writer --prefer-provider codex \
-  --min-score cursorbench=67 --min-score deep_swe=65 \
-  --min-score frontier_code=60
+  --reasoning-depth deep --purpose writer --prefer-provider codex
 ```
 
-主 Agent 不应为了选中某个现有模型回调阈值。缺少指定维度即证据不足，不能用总分、厂商声称或名称补齐。默认模板只用于把风险翻译成起点：bounded 普通实现可用 `cursorbench>=60`；prototype 可用 `cursorbench>=67, apex_agents>=55`；complex 可用 `cursorbench>=67, deep_swe>=65, frontier_code>=60`；root-cause 可用 `cursorbench>=67, deep_swe>=65, terminal_bench>=30`；高风险 Review 可用 `cursorbench>=67, deep_swe>=65, frontier_code>=60`。实际并发、安全、持久化、终端调试、研究或产品风险可收紧，不得机械照抄。
+主 Agent 不应为了选中某个现有模型回调阈值。缺少指定维度即证据不足，不能用总分、厂商声称或名称补齐。`required-tier + reasoning-depth + task-class` 是普通路由输入；`--min-score` 只在某个公开 benchmark 维度本身就是本票真实能力要求时才传，不能把一组通用分数模板机械附到所有 complex/root-cause/Review，也不能因某档公开维度较完整就把任务升级到该推理档。评分卡回答“现有公开证据是否满足显式最低值”，不回答“本票应该使用 High、XHigh 还是 Max”。
+
+`reasoning-depth` 由任务真实推理负载确定，不与 task class 机械绑定：冻结且路径清晰的普通强实现/Review 用 `standard`；确有深层状态流、已建立复杂根因或多约束验证用 `deep`；只有能指出 XHigh 不足所对应的代表性质量风险，或安全/权限/隐私/迁移/并发等最高风险最终 Review，才用 `maximum`。若不能证明需要更深档，保持较低档；用户说“优先 Codex/Cursor”只改变同一最低充分深度内的 provider 排序，永不升级推理档。
 
 Spark 没有与当前权威表同口径的公开分数，只能在 `exploration` / `micro_edit` 的冻结角色契约满足且没有额外数值门槛时入选；指定任一评分最低值后，未评分角色自动排除。这样把“没测过”当作未知，而不是零分或合格。
 
@@ -56,13 +58,15 @@ Cursor 候选在每次 `select` 都重新取 CLI 账户模型总表，再只读 
 
 Auto 是底层型号不可观测的自适应路由器，不是一个可评分的 medium 模型。Cursor Router 会读取 query、上下文、复杂度和领域，所以冻结简报须如实写风险/跨度以帮助分类；但提示词不是强制型号协议，当前 CLI 也不公开底层型号或 Intelligence/Balance/Cost 选择。router 不给它填 benchmark 或 task score，也不允许它满足任何 `--min-score`；只按保守策略给予 `policy_ceiling: medium`，用于无数值门槛的窄探索、微改或普通有界实现。strong、根因、高风险 Review 或任一显式评分门槛必须使用有评分的显式模型。将来运行时可显式选择且证明 Auto Intelligence 时再单独建策略证据，不靠提示词猜 strong。
 
-脚本随后排除未满足 tier、任一最低评分、当前未开启模型或新鲜耗尽池的候选，再综合用户 provider 偏好、任务适用面、池使用比例、评分、平均任务成本与 fast 偏好排序。显式偏好优先于默认成本/额度权重，但永不绕过前述合格性门禁；没有显式偏好时才使用自动权衡。冻结窄探索/微改在无数值门槛时优先独立 Spark 池；`codex_main` 在主池紧张时自然后移，但 required tier 永不降级。Codex Sol Max 角色可继承同型号/推理档位的第二层评分卡，再与冻结角色适用面求交；型号或档位无法唯一映射时仍按未评分角色处理。返回 `recommended`、最多四个 `alternatives`、`preference` 收据、启用模型证据、使用到的评分/额度新鲜度和最小 pool facts；上层不读写缓存文件。
+脚本随后排除未满足 tier、reasoning depth、任一最低评分、当前未开启模型或新鲜耗尽池的候选；先最小化超过要求的 reasoning depth，再在同一最低充分深度内综合用户 provider 偏好、任务适用面、池使用比例、评分、平均任务成本与 fast 偏好排序。这样 provider 偏好优先于默认成本/额度权重，但永不以更深推理档“满足”偏好；没有同深度合格偏好候选时回退并给出机器原因。冻结窄探索/微改在无数值门槛时优先独立 Spark 池；`codex_main` 在主池紧张时自然后移，但 required tier 和 reasoning depth 永不降级。固定 Codex 角色的 tier 来自受限角色契约；同型号/推理档位若能唯一对应第二层评分卡，可额外满足调用方显式指定的逐维最低值，但公开总分不反向改写该角色 tier。型号或档位无法唯一映射时仍按未评分角色处理。返回 `recommended`、最多四个 `alternatives`、`preference` 收据、深度证据、启用模型证据、评分/额度新鲜度和最小 pool facts；上层不读写缓存文件。
 
 ## 上层 Review
 
 所有 writer 的非空 delta 都只是待审候选。上层在同一稳定 fingerprint 上再次调用 router（`purpose=reviewer`，门槛不得低于 writer/风险），同一 Agent 身份被硬排除而非只降权，然后选择：
 
-- `critical_reviewer`；
+- `reasoning_depth=standard` 的 `strong_reviewer`（High）；
+- `reasoning_depth=deep` 的 `critical_reviewer`（XHigh）；
+- `reasoning_depth=maximum` 的 `max_reviewer`（Max）；
 - router 返回的合格 Cursor 模型，通过 adapter 的显式只读 `review` 子命令。
 
 当前宿主没有向脚本提供主会话的可验证模型/能力收据，router 不把 `current_session` 合成为 strong。weak/medium 的 controller 直接检查仍是工作流内检查，不冒充独立候选；strong Review 必须使用有收据的不同 Agent。

@@ -40,9 +40,27 @@ def _load_tier_policy() -> Any:
     return module
 
 
+def _load_reasoning_policy() -> Any:
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "agent-model-router/tools/reasoning_policy.py"
+    )
+    specification = importlib.util.spec_from_file_location(
+        "_engineering_agent_rules_reasoning_policy", path,
+    )
+    if specification is None or specification.loader is None:
+        raise RuntimeError("agent-model-router reasoning policy is unavailable")
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
 _tier_policy = _load_tier_policy()
 _tier_names = _tier_policy.TIER_NAMES
 _tier_at_least = _tier_policy.tier_at_least
+_reasoning_policy = _load_reasoning_policy()
+_reasoning_depth_names = _reasoning_policy.REASONING_DEPTH_NAMES
+_reasoning_depth_at_least = _reasoning_policy.reasoning_depth_at_least
 
 
 def _reject_constant(value: str) -> None:
@@ -156,8 +174,8 @@ def validate_definition(value: Any) -> dict[str, Any]:
             "write_paths", "run_verification", "git_policy", "context", "tickets",
         },
     )
-    if definition["schema_version"] != 1:
-        raise ValidationError("task.schema_version must equal 1")
+    if definition["schema_version"] != 2:
+        raise ValidationError("task.schema_version must equal 2")
     _identifier(definition["task_id"], "task.task_id")
     for field in ("title", "goal"):
         _string(definition[field], f"task.{field}")
@@ -233,23 +251,32 @@ def validate_definition(value: Any) -> dict[str, Any]:
             raise ValidationError(f"ticket {ticket_id} dependencies must refer to earlier tickets")
         _commands(ticket["verification"], "ticket.verification")
         _strings(ticket["stop_conditions"], "ticket.stop_conditions", nonempty=True)
-        risk = _object(ticket["risk"], "ticket.risk", {"required_tier"})
+        risk = _object(
+            ticket["risk"], "ticket.risk",
+            {"required_tier", "reasoning_depth"},
+        )
         if risk["required_tier"] not in _tier_names:
             raise ValidationError("unknown required tier")
+        if risk["reasoning_depth"] not in _reasoning_depth_names:
+            raise ValidationError("unknown reasoning depth")
         seen.add(ticket_id)
     return definition
 
 
 def task_digest(definition: dict[str, Any]) -> str:
-    return digest_value("agent-task-runtime:task:v1", definition)
+    return digest_value("agent-task-runtime:task:v2", definition)
 
 
-def validate_review(value: Any, *, fingerprint: str, required_tier: str) -> dict[str, Any]:
+def validate_review(
+    value: Any, *, fingerprint: str, required_tier: str,
+    required_reasoning_depth: str,
+) -> dict[str, Any]:
     review = _object(
         value,
         "review",
         {
             "schema_version", "reviewer", "provider", "model", "tier",
+            "reasoning_depth",
             "candidate_fingerprint", "conclusion", "findings", "counterexample",
         },
     )
@@ -260,6 +287,10 @@ def validate_review(value: Any, *, fingerprint: str, required_tier: str) -> dict
     _string(review["model"], "review.model")
     if not _tier_at_least(review["tier"], required_tier):
         raise ValidationError("review tier is below the required tier")
+    if not _reasoning_depth_at_least(
+        review["reasoning_depth"], required_reasoning_depth
+    ):
+        raise ValidationError("review reasoning depth is below the required depth")
     if review["candidate_fingerprint"] != fingerprint:
         raise StaleCandidateError("review does not bind the current candidate")
     if review["conclusion"] != "passed":
@@ -300,6 +331,7 @@ def _result(value: Any, label: str) -> dict[str, Any]:
         result["review"], f"{label}.review",
         {
             "schema_version", "reviewer", "provider", "model", "tier",
+            "reasoning_depth",
             "candidate_fingerprint", "conclusion", "findings", "counterexample",
         },
     )
@@ -309,6 +341,8 @@ def _result(value: Any, label: str) -> dict[str, Any]:
         _string(review[field], f"{label}.review.{field}")
     if review["tier"] not in _tier_names:
         raise ValidationError(f"{label}.review tier is invalid")
+    if review["reasoning_depth"] not in _reasoning_depth_names:
+        raise ValidationError(f"{label}.review reasoning depth is invalid")
     if review["candidate_fingerprint"] != preview["fingerprint"]:
         raise ValidationError(f"{label}.review does not bind its candidate")
     _strings(review["findings"], f"{label}.review.findings", nonempty=False)
@@ -325,7 +359,7 @@ def validate_state(definition: dict[str, Any], value: Any) -> dict[str, Any]:
             "run_result",
         },
     )
-    if state["schema_version"] != 1 or state["task_id"] != definition["task_id"]:
+    if state["schema_version"] != 2 or state["task_id"] != definition["task_id"]:
         raise ValidationError("state identity mismatch")
     if state["task_digest"] != task_digest(definition):
         raise ValidationError("state task digest mismatch")
@@ -343,6 +377,11 @@ def validate_state(definition: dict[str, Any], value: Any) -> dict[str, Any]:
             raise ValidationError("state ticket mismatch")
         if current["state"] == "complete":
             result = _result(current["result"], "state.ticket.result")
+            validate_review(
+                result["review"], fingerprint=result["candidate"]["fingerprint"],
+                required_tier=expected["risk"]["required_tier"],
+                required_reasoning_depth=expected["risk"]["reasoning_depth"],
+            )
             expected_fingerprint = digest_value(
                 f"agent-task-runtime:ticket:{current['id']}-candidate:v1",
                 result["candidate"]["files"],
@@ -356,6 +395,14 @@ def validate_state(definition: dict[str, Any], value: Any) -> dict[str, Any]:
             _snapshot(state[field], f"state.{field}")
     if state["state"] == "complete":
         result = _result(state["run_result"], "state.run_result")
+        validate_review(
+            result["review"], fingerprint=result["candidate"]["fingerprint"],
+            required_tier="strong",
+            required_reasoning_depth=max(
+                (ticket["risk"]["reasoning_depth"] for ticket in definition["tickets"]),
+                key=_reasoning_policy.REASONING_DEPTH_LEVELS.__getitem__,
+            ),
+        )
         expected_fingerprint = digest_value(
             "agent-task-runtime:run-candidate:v1", result["candidate"]["files"]
         )
