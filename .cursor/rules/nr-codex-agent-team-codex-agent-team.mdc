@@ -1,0 +1,21 @@
+---
+description: Codex 叶子 Agent 团队——按冻结边界选择探索、微型实现、局部实现或独立审查角色
+alwaysApply: false
+---
+
+# Codex 叶子 Agent 团队
+
+使用 `.codex/agents/` 下安装的 `explorer`、`spark_worker`、`bounded_worker`、`strong_worker` 与 `critical_reviewer` 时加载。是否委派、并行、降级和重派仍以[多 Agent 委派](nr-agent-delegation.mdc)为准；委派前按[多 Agent 简报](nr-agent-session-kits-multi-agent-brief.mdc)冻结目标、证据、所有权和停止条件，具体执行端由[统一模型路由](nr-agent-model-router-model-routing.mdc)根据能力最低值、评分证据、用户 provider 偏好和独立额度池选择。
+
+- 主 Agent 的会话模型由用户选择，本 pack 不安装或修改 `.codex/config.toml`。主 Agent 持有范围、产品/架构判断、整合、共享验证、Git 与最终交付；跨 async callback 的状态关联、actor/并发/生命周期所有权、安全/权限/隐私、密码学、持久化/迁移、生产接线或根因未明时，也由主 Agent 或已确认的 strong 模型负责判断，不能按文件数量降档。叶子 Agent 只可承接其中已经冻结的纯 helper。
+- 本 pack 是 Codex 执行端的能力 adapter：固定角色契约只证明其明确适用面，不伪造 benchmark 分数。主 Agent 指定任一数值评分下限后，未评分 Codex 角色自动排除；无数值门槛的冻结窄探索/微改才可优先独立 Spark 池。配置未声明的能力不得猜，也不得把 required tier 伪降级。
+- `required_tier` 只冻结能力下限；执行面支持选择时，controller 在已知同档或更高档候选中按本票的实际推理负载、工具、隐私和可用性选择具体 provider/model 与推理强度，不得静默降档；固定角色沿用已声明配置。没有 router 评分收据的临时 strong 角色默认使用 `xhigh`，不能因文件多、任务长或普通 strong 标签擅自升到 `max`；统一 router 只有在评分门槛和角色适用面都通过时，才可选择本 pack 明确声明的 Sol Max `strong_worker` / `critical_reviewer`。
+- `explorer`（Codex-Spark Medium）只接窄问题的只读文件/符号/调用点/既有模式定位，返回证据指针和未确认项；宽泛全仓综合、图片理解、产品/架构判断或根因仲裁交回主 Agent。模型不可用或独立额度失败时不反复重试。
+- `spark_worker`（Codex-Spark Medium）只做根因或契约已冻结的 R0/R1 微型改动，最多两个明确文件；适合文字约束明确的简单 UI、fixture/preview、冻结 API 的定向测试、机械编辑和已定位简单修复。图片须先由支持视觉的主模型解释并冻结文字验收。模型不可用或额度失败时不反复重试；原简报可单次降级给 `bounded_worker`，不得扩 scope。
+- Spark writer 的候选不得直接交付：上层按统一 router 选择未参与写入且能力足够的 controller、`critical_reviewer` 或 Cursor Reviewer，重读实际 diff、生产路径和冻结验收并持有直接 oracle；有 blocker 时只回派一次聚焦修复再复核。只读 `explorer` 没有写入候选，不触发此闭环。
+- `bounded_worker`（Terra High）实施范围、语义和文件所有权均冻结的局部改动；触及公共契约、状态所有权、并发/权限或新文件范围时停手交回。
+- `strong_worker`（Sol Max）只接产品/架构/验收/写域/direct oracle 已冻结的复杂实现，可处理内聚的多文件状态流与深层局部推理；根因未明、公共契约待定，或安全/并发/迁移/持久化所有权仍需裁决时停回主 Agent。它不是二级 coordinator，不继续委派。
+- `critical_reviewer`（Sol Max）只在 writer 完成有界候选和定向 oracle 后审同一稳定候选并列 findings；不跟随中间版本，也不接手修复。普通票一次 Review、一轮修复后一次 closure；高风险安全票可增加独立视角，但都审同一 fingerprint。通过的静态审查和测试不能冒充未执行的交互、真机、浏览器或运行时 smoke，剩余证据缺口必须披露。
+- 整棵任务同时最多一个写 Agent。同一候选的共享 build/test 由主 Agent 在整合后统一执行；叶子只报告建议检查。五个角色都是叶子，不得继续委派或改变 Git 上下文。
+
+项目私有 `AGENTS.md` 负责补充业务术语、风险阈值、允许文件、测试命令、运行环境和更严格约束；不得在共享 Agent TOML 中写入项目名或业务参数。

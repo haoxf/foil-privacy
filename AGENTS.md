@@ -5,7 +5,7 @@
 
 基线由 `.cursor/rules/` 下已安装的 `nr-*.mdc` 提供。Cursor 按 frontmatter / globs 路由；Codex 等非 Cursor Agent 须按下方索引打开匹配规则，勿依赖未列出的全文。始终生效规则无需场景触发。
 
-已安装 pack：`agent-model-router`, `agent-session-kits`, `agent-task-runtime`, `cursor-agent-adapter`
+已安装 pack：`agent-model-router`, `agent-session-kits`, `agent-task-runtime`, `codex-agent-team`, `cursor-agent-adapter`
 
 始终生效：
 
@@ -23,6 +23,7 @@
 - 多 Agent 简报——委派前按已安装 multi-agent-brief 模板填有界字段；有模板不强制开子 Agent → `.cursor/rules/nr-agent-session-kits-multi-agent-brief.mdc`
 - 可选会话复盘——用户要求、卡住刹车上报或明显拉扯/高成本时按已安装 session-retro 模板写短表 → `.cursor/rules/nr-agent-session-kits-session-retro.mdc`
 - 可选任务运行时——对齐复杂任务、逐票验证并保持长会话方向稳定 → `.cursor/rules/nr-agent-task-runtime-task-runtime.mdc`
+- Codex 叶子 Agent 团队——按冻结边界选择探索、微型实现、局部实现或独立审查角色 → `.cursor/rules/nr-codex-agent-team-codex-agent-team.mdc`
 - Cursor Agent adapter——同步执行或只读审查合格叶子并返回最小事实收据 → `.cursor/rules/nr-cursor-agent-adapter-cursor-agent-adapter.mdc`
 - 共享交付门禁——按三路径审计稳定候选、证据、审查和 Git 契约 → `.cursor/rules/nr-delivery-gate.mdc`
 - 共享规则维护——规则变更后同步项目路由、引用与托管状态 → `.cursor/rules/nr-rules-maintenance.mdc`
