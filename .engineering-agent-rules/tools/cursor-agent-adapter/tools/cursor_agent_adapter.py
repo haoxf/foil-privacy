@@ -436,12 +436,15 @@ AUTO_MODEL = re.compile(r"^(?:[>*✓•-]\s*)?auto(?:\s+-\s+auto(?:\s+\(|$)|$)",
 def preflight(
     executable: str | None = None, *, timeout_seconds: float = 15.0,
     env: Mapping[str, str] | None = None,
+    dispatch_policy_path: Path | None = None,
 ) -> dict[str, Any]:
+    policy = _dispatch_policy.load_policy(dispatch_policy_path)
     resolved = _resolve_executable(executable)
     result = {
         "schema_version": 1, "command": "preflight", "status": "missing_executable",
         "executable": resolved, "executable_available": resolved is not None,
         "authenticated": None, "auto_model_available": None, "ready": False,
+        "runtime_ready": False, "dispatch_policy": policy,
     }
     if resolved is None:
         return result
@@ -471,7 +474,15 @@ def preflight(
         AUTO_MODEL.search(line.strip()) for line in models["stdout"].splitlines()
     )
     result["status"] = "ready" if result["auto_model_available"] else "auto_unavailable"
-    result["ready"] = result["status"] == "ready"
+    result["runtime_ready"] = result["status"] == "ready"
+    result["ready"] = result["runtime_ready"]
+    if result["runtime_ready"] and not policy["policy"]["cursor_adapter_enabled"]:
+        result["status"] = (
+            "dispatch_policy_invalid"
+            if policy["status"] == "invalid"
+            else "globally_disabled"
+        )
+        result["ready"] = False
     return result
 
 
@@ -654,6 +665,9 @@ _tier_policy = _load_router_tool(
 _reasoning_policy = _load_router_tool(
     "reasoning_policy.py", "_engineering_agent_rules_reasoning_policy",
 )
+_dispatch_policy = _load_router_tool(
+    "dispatch_policy.py", "_engineering_agent_rules_dispatch_policy",
+)
 _receipt_key_matches = _model_identity.receipt_key_matches
 _tier_names = _tier_policy.TIER_NAMES
 _tier_at_least = _tier_policy.tier_at_least
@@ -754,9 +768,23 @@ def run_cursor(
     env: Mapping[str, str] | None = None,
     usage_cache_path: Path | None = None,
     operation: str = "write",
+    dispatch_policy_path: Path | None = None,
 ) -> dict[str, Any]:
     if operation not in {"write", "review"}:
         raise ValueError("operation must be write or review")
+    policy = _dispatch_policy.load_policy(dispatch_policy_path)
+    if not policy["policy"]["cursor_adapter_enabled"]:
+        return _receipt(
+            command=operation,
+            status=(
+                "dispatch_policy_invalid"
+                if policy["status"] == "invalid"
+                else "adapter_disabled"
+            ),
+            fallback_eligible=True,
+            fallback_reason="cursor_adapter_disabled",
+            dispatch_policy=policy,
+        )
     if required_tier not in _tier_names:
         raise ValueError("required_tier must be weak, medium, or strong")
     if assessed_tier not in _tier_names:
@@ -785,6 +813,7 @@ def run_cursor(
 
     def finish(receipt: dict[str, Any]) -> dict[str, Any]:
         receipt["quota_pool_id"] = quota_pool_id
+        receipt["dispatch_policy"] = policy
         progress.completed(
             str(receipt["status"]), int(receipt.get("attempt_count", 0)),
         )
@@ -1018,6 +1047,7 @@ def _parser() -> argparse.ArgumentParser:
     check = commands.add_parser("preflight")
     check.add_argument("--cursor-command")
     check.add_argument("--timeout-seconds", type=float, default=15.0)
+    check.add_argument("--dispatch-policy-path", type=Path)
     run = commands.add_parser("run")
     run.add_argument("--repo", required=True, type=Path)
     run.add_argument("--cursor-command")
@@ -1040,6 +1070,7 @@ def _parser() -> argparse.ArgumentParser:
         choices=("auto", "third_party", "cursor_native"),
     )
     run.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
+    run.add_argument("--dispatch-policy-path", type=Path)
     review = commands.add_parser("review")
     review.add_argument("--repo", required=True, type=Path)
     review.add_argument("--cursor-command")
@@ -1061,13 +1092,18 @@ def _parser() -> argparse.ArgumentParser:
         choices=("auto", "third_party", "cursor_native"),
     )
     review.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
+    review.add_argument("--dispatch-policy-path", type=Path)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     if arguments.command == "preflight":
-        result = preflight(arguments.cursor_command, timeout_seconds=arguments.timeout_seconds)
+        result = preflight(
+            arguments.cursor_command,
+            timeout_seconds=arguments.timeout_seconds,
+            dispatch_policy_path=arguments.dispatch_policy_path,
+        )
         code = 0 if result["ready"] else 2
     else:
         try:
@@ -1083,6 +1119,7 @@ def main(argv: list[str] | None = None) -> int:
                 prompt=sys.stdin.read(), timeout_seconds=arguments.timeout_seconds,
                 model=arguments.model, model_source=arguments.model_source,
                 operation="write" if arguments.command == "run" else "review",
+                dispatch_policy_path=arguments.dispatch_policy_path,
             )
         except ValueError as error:
             result = {"schema_version": 1, "command": "run", "status": "invalid_request", "error": str(error)}

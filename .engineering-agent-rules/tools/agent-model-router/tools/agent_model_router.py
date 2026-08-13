@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 import codex_usage
 import cursor_model_selection
+import dispatch_policy
 from model_identity import (
     canonical_model_key, effort_from_model_identity, receipt_model_key,
 )
@@ -407,6 +408,7 @@ def recommend(
     codex_roles: list[dict[str, Any]], writer_model: str | None = None,
     prefer_fast: bool = False,
     preferred_provider: str = "auto",
+    cursor_adapter_enabled: bool = True,
     minimum_scores: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     if (
@@ -425,7 +427,7 @@ def recommend(
         raise ValueError("score minimum must be a finite non-negative number")
     candidates: list[dict[str, Any]] = []
     if not (task_class == "root_cause" and purpose == "writer"):
-        if task_class != "root_cause":
+        if task_class != "root_cause" and cursor_adapter_enabled:
             candidates = _cursor_candidates(
                 cursor_models, scorecard, task_class=task_class
             )
@@ -532,9 +534,13 @@ def recommend(
                 None
                 if preferred_provider == "auto" or preference_honored
                 else (
-                    f"no eligible {preferred_provider} candidate at the minimum "
-                    "sufficient reasoning depth satisfied capability, purpose, "
-                    "score, and quota gates"
+                    "Cursor adapter is disabled by the global dispatch policy"
+                    if preferred_provider == "cursor" and not cursor_adapter_enabled
+                    else (
+                        f"no eligible {preferred_provider} candidate at the minimum "
+                        "sufficient reasoning depth satisfied capability, purpose, "
+                        "score, and quota gates"
+                    )
                 )
             ),
         },
@@ -545,9 +551,17 @@ def select(
     *, repo: Path, task_class: str, required_tier: str,
     reasoning_depth: str, purpose: str,
     writer_model: str | None = None, prefer_fast: bool = False,
-    preferred_provider: str = "auto",
+    preferred_provider: str | None = None,
     minimum_scores: dict[str, float] | None = None,
+    dispatch_policy_path: Path | None = None,
 ) -> dict[str, Any]:
+    policy = dispatch_policy.load_policy(dispatch_policy_path)
+    effective_preference = (
+        preferred_provider
+        if preferred_provider is not None
+        else policy["policy"]["provider_preference"]
+    )
+    adapter_enabled = policy["policy"]["cursor_adapter_enabled"] is True
     account_models = live_cursor_models()
     cursor_selection = cursor_model_selection.read_enabled_model_families()
     enabled_models = cursor_model_selection.filter_enabled_cli_models(
@@ -565,8 +579,13 @@ def select(
         codex_roles=discover_codex_roles(repo.resolve()),
         writer_model=writer_model,
         prefer_fast=prefer_fast,
-        preferred_provider=preferred_provider,
+        preferred_provider=effective_preference,
+        cursor_adapter_enabled=adapter_enabled,
         minimum_scores=minimum_scores,
+    )
+    result["dispatch_policy"] = policy
+    result["preference"]["source"] = (
+        "explicit_task" if preferred_provider is not None else "global_default"
     )
     result["evidence"]["cursor_model_selection"] = {
         "status": cursor_selection.get("status", "unavailable"),
@@ -615,8 +634,10 @@ def _parser() -> argparse.ArgumentParser:
     choose.add_argument(
         "--prefer-provider",
         choices=sorted(PREFERRED_PROVIDERS),
-        default="auto",
-        help="用户显式 provider 软优先；能力、用途、评分与额度门禁仍不可绕过",
+        default=None,
+        help=(
+            "用户显式 provider 软优先；省略时读取全局策略；能力、用途、评分与额度门禁仍不可绕过"
+        ),
     )
     choose.add_argument(
         "--min-score",
@@ -649,6 +670,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         result = {
             "schema_version": SCHEMA_VERSION,
+            "dispatch_policy": dispatch_policy.load_policy(),
             "scorecard": model_score_cache.get_scorecard(),
             "cursor_quota": get_cursor_usage(),
             "codex_quota": codex_usage.get_usage(),

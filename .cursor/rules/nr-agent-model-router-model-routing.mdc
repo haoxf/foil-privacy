@@ -18,7 +18,7 @@ router 的结构化候选是一次调度的唯一能力收据：adapter 与上�
 - `required-tier`：`weak | medium | strong` 能力下限。
 - `reasoning-depth`：`economy | standard | deep | maximum` 推理投入下限，与能力 tier 正交。对 Codex 固定角色分别映射到 Medium/Low 一类轻量 effort、High、XHigh、Max；Cursor 显式 variant 只从运行时 model id/display 的一致 effort 证据映射，无显式或冲突 effort 的静态模型 fail-closed 排除，Auto 只记 `economy`。脚本优先选择满足要求的最低深度，不能因 provider 偏好、额度、文件数或普通 strong 标签越级。
 - 零个或多个 `--min-score DIMENSION=MINIMUM`：模型必须逐项达到的机器证据。支持 `overall_score`、`task_score`、`cursorbench`、`deep_swe`、`frontier_code`、`terminal_bench`、`apex_agents`、`aa_intelligence`、`gdpval_aa`、`apex_swe`、`aa_briefcase`、`harvey_lab`。
-- `--prefer-provider auto|codex|cursor`：用户显式 provider 软优先；当前任务中用户说“优先使用 Codex/Cursor”后，后续每次 `select` 都必须传对应值，直到用户更改或取消。偏好只在已通过任务适用面、writer/reviewer、required tier、reasoning depth、逐维评分与额度门禁，且处于最低充分推理深度的候选之间改变排序，不能强行选用不合格、已耗尽或更深档 provider；回退时收据必须包含 `preference.honored=false` 与机器生成原因。不传时为 `auto`。
+- `--prefer-provider auto|codex|cursor`：当前任务显式 provider 软优先；用户在当前任务说“优先使用 Codex/Cursor”后，后续每次 `select` 都传对应值，直到用户更改或取消，并覆盖全局默认。省略参数时读取 `~/.config/engineering-agent-rules/dispatch-policy.json`；文件缺失默认 `auto + adapter enabled`，损坏则安全降级为 `auto + adapter disabled` 并在收据标记 `invalid`。偏好只在已通过任务适用面、writer/reviewer、required tier、reasoning depth、逐维评分与额度门禁，且处于最低充分推理深度的候选之间改变排序，不能强行选用不合格、已耗尽或更深档 provider；回退时收据必须包含 `preference.honored=false` 与机器生成原因。
 - `purpose=writer|reviewer`；Reviewer 另传 `--writer-model`，脚本会降低同模型优先级，但独立性的硬条件仍是不同 Agent 身份和稳定候选。
 
 ```sh
@@ -26,6 +26,16 @@ python3 .engineering-agent-rules/tools/agent-model-router/tools/agent_model_rout
   select --repo . --task-class complex_implementation --required-tier strong \
   --reasoning-depth deep --purpose writer --prefer-provider codex
 ```
+
+本机菜单栏 App 和人工 CLI 只通过同 pack 的单一工具原子读写全局策略，不直接拼 JSON：
+
+```sh
+python3 .engineering-agent-rules/tools/agent-model-router/tools/dispatch_policy.py get
+python3 .engineering-agent-rules/tools/agent-model-router/tools/dispatch_policy.py set \
+  --prefer-provider auto --cursor-adapter enabled
+```
+
+`cursor_adapter_enabled=false` 高于 provider 偏好：router 不产生 Cursor 候选，adapter 自身也在启动前拒绝 writer/reviewer；它不退出 Cursor App、不影响用户直接使用 Cursor，也不中断已经运行的调用。偏好值继续保留，重新启用后恢复生效。当前任务显式 `--prefer-provider` 只能覆盖 provider 偏好，不能绕过 adapter 禁用。
 
 主 Agent 不应为了选中某个现有模型回调阈值。缺少指定维度即证据不足，不能用总分、厂商声称或名称补齐。`required-tier + reasoning-depth + task-class` 是普通路由输入；`--min-score` 只在某个公开 benchmark 维度本身就是本票真实能力要求时才传，不能把一组通用分数模板机械附到所有 complex/root-cause/Review，也不能因某档公开维度较完整就把任务升级到该推理档。评分卡回答“现有公开证据是否满足显式最低值”，不回答“本票应该使用 High、XHigh 还是 Max”。
 

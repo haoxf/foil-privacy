@@ -15,7 +15,7 @@ R1/R2 在需求、验收、产品/架构选择和根因完成后，只把自然�
 
 ## 同步 writer 调用
 
-先运行 `preflight`，只检查 CLI、登录和 Auto 可见性；ready 不代表额度。主 Agent 用 router 的 `recommended` 填入模型和来源，再通过 stdin 发送冻结简报：
+先运行 `preflight`，检查全局策略、CLI、登录和 Auto 可见性；`globally_disabled` 仍可报告底层 CLI 已连接，但不可派发，ready 不代表额度。主 Agent 用 router 的 `recommended` 填入模型和来源，再通过 stdin 发送冻结简报：
 
 ```text
 run --repo ROOT --allowed-write-path PATH --required-tier weak|medium|strong
@@ -27,7 +27,7 @@ run --repo ROOT --allowed-write-path PATH --required-tier weak|medium|strong
     --model MODEL --model-source auto|third_party|cursor_native
 ```
 
-wrapper 使用 `--print --force --trust --sandbox enabled --output-format stream-json` 前台等待本次进程组；prompt 不进 argv、stdout 或 receipt。根进程成功终态后只留短暂退出宽限，逾期停止本组；收到终态仍不退出视为可能写入失败。简报禁止 commit、切分支、push/PR、扩 scope 和写 runtime。
+wrapper 启动前再次读取 `~/.config/engineering-agent-rules/dispatch-policy.json`；adapter 被禁用或策略损坏时不启动 Cursor，返回可回退收据。允许时使用 `--print --force --trust --sandbox enabled --output-format stream-json` 前台等待本次进程组；prompt 不进 argv、stdout 或 receipt。根进程成功终态后只留短暂退出宽限，逾期停止本组；收到终态仍不退出视为可能写入失败。简报禁止 commit、切分支、push/PR、扩 scope 和写 runtime。
 
 stderr 只输出固定阶段、计数和每 25 秒心跳；stdout 只输出一份 JSON receipt。不得转发 prompt、模型正文、工具参数、路径、diff 或 Cursor 原始输出。显式模型、来源、`assessed-tier`、`assessed-reasoning-depth`、opaque `receipt-key` 与 `quota-pool` 必须逐字来自本次 router 的同一 `recommended`；adapter 不维护第二份模型名→tier/depth、模型名→额度池或别名归一化表。system init 形成 model receipt，共享 identity 工具核对失败时 `model_receipt_mismatch`，router 评定 tier 或 depth 低于要求时 `insufficient_model_capability`。
 
