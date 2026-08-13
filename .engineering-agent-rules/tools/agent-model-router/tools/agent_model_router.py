@@ -34,6 +34,7 @@ TASK_CLASSES = {
     "high_risk_review",
 }
 PURPOSES = {"writer", "reviewer"}
+PREFERRED_PROVIDERS = {"auto", "codex", "cursor"}
 SCORE_DIMENSIONS = {
     "overall_score",
     "task_score",
@@ -283,6 +284,9 @@ _ROLE_TASKS = {
     "explorer": {"exploration"},
     "spark_worker": {"micro_edit"},
     "bounded_worker": {"bounded_implementation"},
+    "strong_worker": {
+        "prototype", "complex_implementation", "root_cause",
+    },
     "critical_reviewer": {
         "bounded_implementation", "prototype", "complex_implementation",
         "root_cause", "high_risk_review",
@@ -291,8 +295,10 @@ _ROLE_TASKS = {
 
 
 def _codex_candidates(
-    roles: list[dict[str, Any]], *, task_class: str, purpose: str,
+    roles: list[dict[str, Any]], scorecard: dict[str, Any],
+    *, task_class: str, purpose: str,
 ) -> list[dict[str, Any]]:
+    scores = _score_index(scorecard)
     candidates: list[dict[str, Any]] = []
     for role in roles:
         name = role["role"]
@@ -304,8 +310,7 @@ def _codex_candidates(
             continue
         spark = name in {"explorer", "spark_worker"}
         tier = "medium" if spark or name == "bounded_worker" else "strong"
-        candidates.append(
-            {
+        candidate: dict[str, Any] = {
                 "executor": "codex_agent",
                 "role": name,
                 "model_id": role["model_id"],
@@ -315,7 +320,32 @@ def _codex_candidates(
                 "task_score": None,
                 "score_evidence": "frozen_role_contract",
             }
-        )
+        try:
+            score_key = canonical_model_key(
+                f"{role['model_id']} {role['reasoning_effort']}",
+                f"{role['model_id']} {role['reasoning_effort']}",
+            )
+        except ValueError:
+            score_key = ""
+        scored = scores.get(score_key)
+        task_score = scored.get("task_scores", {}).get(task_class) if scored else None
+        if scored is not None and type(task_score) in (int, float):
+            candidate.update(
+                {
+                    "capability_mode": "benchmarked_codex_role",
+                    "numeric_scores_available": True,
+                    "task_score": float(task_score),
+                    "overall_score": scored.get("overall_score"),
+                    "average_cost_usd": scored.get("average_cost_usd"),
+                    "scores": {
+                        "overall_score": scored.get("overall_score"),
+                        "task_score": float(task_score),
+                        **scored.get("dimensions", {}),
+                    },
+                    "score_evidence": "derived_scorecard_plus_frozen_role",
+                }
+            )
+        candidates.append(candidate)
     return candidates
 
 
@@ -337,9 +367,15 @@ def recommend(
     cursor_quota: dict[str, Any], codex_quota: dict[str, Any],
     codex_roles: list[dict[str, Any]], writer_model: str | None = None,
     prefer_fast: bool = False,
+    preferred_provider: str = "auto",
     minimum_scores: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    if task_class not in TASK_CLASSES or required_tier not in TIER_LEVELS or purpose not in PURPOSES:
+    if (
+        task_class not in TASK_CLASSES
+        or required_tier not in TIER_LEVELS
+        or purpose not in PURPOSES
+        or preferred_provider not in PREFERRED_PROVIDERS
+    ):
         raise ValueError("invalid routing request")
     pools = _pool_facts(cursor_quota, codex_quota)
     minimums = minimum_scores or {}
@@ -348,7 +384,9 @@ def recommend(
     if any(type(value) not in (int, float) or not 0 <= value <= 10000 for value in minimums.values()):
         raise ValueError("score minimum must be a finite non-negative number")
     candidates = _cursor_candidates(cursor_models, scorecard, task_class=task_class)
-    candidates += _codex_candidates(codex_roles, task_class=task_class, purpose=purpose)
+    candidates += _codex_candidates(
+        codex_roles, scorecard, task_class=task_class, purpose=purpose
+    )
     eligible: list[dict[str, Any]] = []
     for candidate in candidates:
         pool = pools.get(candidate["pool_id"])
@@ -365,7 +403,7 @@ def recommend(
             continue
         score = candidate.get("task_score")
         overall_score = candidate.get("overall_score")
-        if candidate.get("score_evidence") == "derived_scorecard" and (
+        if candidate.get("numeric_scores_available") is True and (
             type(overall_score) not in (int, float)
             or overall_score < TIER_SCORE[required_tier]
         ):
@@ -383,15 +421,37 @@ def recommend(
             rank += 4.0
         if writer_model and candidate.get("model_id") == writer_model:
             rank += 8.0
-        eligible.append({**candidate, "rank": round(rank, 3)})
+        candidate_provider = (
+            "codex" if candidate["executor"] == "codex_agent" else "cursor"
+        )
+        eligible.append(
+            {
+                **candidate,
+                "provider": candidate_provider,
+                "rank": round(rank, 3),
+            }
+        )
     eligible.sort(
         key=lambda item: (
+            0
+            if preferred_provider == "auto"
+            or item["provider"] == preferred_provider
+            else 1,
             item["rank"],
             -(item.get("task_score") or -1),
             item.get("model_id", ""),
         )
     )
     recommended = eligible[0] if eligible else None
+    recommended_provider = (
+        "codex" if recommended and recommended["executor"] == "codex_agent"
+        else "cursor" if recommended else None
+    )
+    preference_honored = (
+        None
+        if preferred_provider == "auto"
+        else recommended_provider == preferred_provider
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "status": "ok" if recommended is not None else "no_eligible_target",
@@ -400,6 +460,7 @@ def recommend(
             "required_tier": required_tier,
             "purpose": purpose,
             "minimum_scores": dict(sorted(minimums.items())),
+            "preferred_provider": preferred_provider,
         },
         "recommended": recommended,
         "alternatives": eligible[1:5],
@@ -410,12 +471,22 @@ def recommend(
             "live_cursor_model_count": len(cursor_models),
         },
         "pools": sorted(pools.values(), key=lambda pool: pool["pool_id"]),
+        "preference": {
+            "requested": preferred_provider,
+            "honored": preference_honored,
+            "fallback_reason": (
+                None
+                if preferred_provider == "auto" or preference_honored
+                else f"no eligible {preferred_provider} candidate satisfied capability, purpose, score, and quota gates"
+            ),
+        },
     }
 
 
 def select(
     *, repo: Path, task_class: str, required_tier: str, purpose: str,
     writer_model: str | None = None, prefer_fast: bool = False,
+    preferred_provider: str = "auto",
     minimum_scores: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     account_models = live_cursor_models()
@@ -434,6 +505,7 @@ def select(
         codex_roles=discover_codex_roles(repo.resolve()),
         writer_model=writer_model,
         prefer_fast=prefer_fast,
+        preferred_provider=preferred_provider,
         minimum_scores=minimum_scores,
     )
     result["evidence"]["cursor_model_selection"] = {
@@ -476,6 +548,12 @@ def _parser() -> argparse.ArgumentParser:
     choose.add_argument("--purpose", required=True, choices=sorted(PURPOSES))
     choose.add_argument("--writer-model")
     choose.add_argument("--prefer-fast", action="store_true")
+    choose.add_argument(
+        "--prefer-provider",
+        choices=sorted(PREFERRED_PROVIDERS),
+        default="auto",
+        help="用户显式 provider 软优先；能力、用途、评分与额度门禁仍不可绕过",
+    )
     choose.add_argument(
         "--min-score",
         action="append",
@@ -539,6 +617,7 @@ def main(argv: list[str] | None = None) -> int:
             purpose=arguments.purpose,
             writer_model=arguments.writer_model,
             prefer_fast=arguments.prefer_fast,
+            preferred_provider=arguments.prefer_provider,
             minimum_scores=minimum_scores,
         )
         code = 0 if result["recommended"] is not None else 2

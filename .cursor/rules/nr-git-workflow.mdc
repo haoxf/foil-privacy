@@ -10,7 +10,7 @@ alwaysApply: true
 - 保持用户分支/worktree，不把用户当前 worktree 自动收编。只有单独授权或 active runtime 的精确 `开始执行` 与冻结 `git_policy` 才可创建/切换分支；仅限本地 branch/逐票 commit/ff-only。worktree 仍需 task 前事先单独授权，`开始执行` 不能代替。
 - 不 stash/restore/reset/clean/rebase/fetch/pull/普通 merge/删分支/改写历史/强制移动 ref；policy 不授权 push、PR、release 或外部动作。
 - 既有修改默认属用户；任务 patch 只含当前请求产生或明确纳入的 hunk。
-- 分支被并发推进时，只有原 HEAD 仍是祖先、新 commit 不与本任务假设或 hunk 重叠、最终审查与验证基于新 HEAD，才能继续；否则停止并报告冲突。
+- 分支被并发推进时，若原 HEAD 仍是祖先、新 commit 不与本任务假设或 hunk 重叠，则自动重基线到新 HEAD、在新 HEAD 上完成最终审查与验证后继续，不要求用户再次确认；只有祖先关系破坏、真实重叠或任务假设失效时才停止并报告冲突。
 - runtime 每次写入和每个 checkpoint commit 都按真实 Git 与 runtime history 重验冻结 branch 生命周期矩阵；歧义停为 needs_replan。
 - 只精确暂存文件或 hunk。任务 commit 禁止使用 `git add .`、`git add -A` 或 `git add -u` 等整体暂存。
 - 已授权 commit 或 merge 前运行项目交付门禁。若既有暂存内容或混合 hunk 无法可靠分离，应停止，不要用 Git 清理命令绕过边界。

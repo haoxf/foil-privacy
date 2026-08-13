@@ -3,7 +3,7 @@
   "assets": {
     ".engineering-agent-rules/templates/agent-session-kits/multi-agent-brief.md": "3f41453a9971c7a9632357ad18aeb22558dd3a3c842e24e99835f2ef0323e24f",
     ".engineering-agent-rules/templates/agent-session-kits/session-retro.md": "3f19c48231eafbdc7dd709b2774ed91472b901e55cdde3b7f466202c24872728",
-    ".engineering-agent-rules/tools/agent-model-router/tools/agent_model_router.py": "4763a36f18cb69421052f07d7a927d286c187def575ea1cad283a43067ff6ecc",
+    ".engineering-agent-rules/tools/agent-model-router/tools/agent_model_router.py": "5e6bf4d1193d93f22d90f954669cd33031f5095ed62577e66819563db3e69d80",
     ".engineering-agent-rules/tools/agent-model-router/tools/cache_store.py": "4637b6221a2d73653bb71d6b05561b0efb6d4bf697472b93ae82ad1d3f8b799a",
     ".engineering-agent-rules/tools/agent-model-router/tools/codex_usage.py": "d71c3049937adafec892c96a4e9707cd09067c19c3665869b90fb0fdc0036c7a",
     ".engineering-agent-rules/tools/agent-model-router/tools/cursor_model_selection.py": "9580ad7c26d821fe4c7e9068f015a39ec2bd6800e568c6312a097d9d7a9ed8e1",
@@ -23,9 +23,9 @@
     ".engineering-agent-rules/tools/cursor-agent-adapter/tools/cursor_agent_adapter.py": "f1b01ecd63039f61c913defb8e70b78c55f2aac7580c3d0edbfc0523b5f8e77c"
   },
   "files": {
-    "nr-agent-delegation.mdc": "0fa2f431ee7f55e2b7cd5de9c53067764d0f7f650d67738b322a0fe90354b53f",
-    "nr-agent-model-router-execution-trigger.mdc": "a1130344f9edd2df425b11b8768b855c8aa44355c42a046b7b3ac106c3e779ff",
-    "nr-agent-model-router-model-routing.mdc": "9259bde3a177b7437c7124d0e5dfeb0797b412d69c9564fbb2da316f5acab509",
+    "nr-agent-delegation.mdc": "351071e441be6342ed4485ccd26892ab566620f87e7e8062e2303daf39eec4bd",
+    "nr-agent-model-router-execution-trigger.mdc": "aa4a833e617cac77b974d57204eed54ade63732e59358713969ebec452e550fc",
+    "nr-agent-model-router-model-routing.mdc": "6d42919d73901b13ab530afb239cd53dc65910fd32cc5aa162735f09aa60c169",
     "nr-agent-session-kits-multi-agent-brief.mdc": "94087f04f5880b5798d353d486b01ea8dad530cf69f557319643ddc22fc81bda",
     "nr-agent-session-kits-session-retro.mdc": "78ca3bba764675d072a470bae32bb21c98d0aea6e0f856cee7bbef5883cbc7f5",
     "nr-agent-task-runtime-execution-trigger.mdc": "57a06c48506c4c55a6538ebe06d1c30820d0d06fa8d61caf590c7906da0922b7",
@@ -35,11 +35,11 @@
     "nr-cursor-agent-adapter-cursor-agent-adapter.mdc": "76b3ce80004c6e0393d28f7242e10a3418379f723621c9a0628de613da200287",
     "nr-cursor-agent-adapter-execution-trigger.mdc": "ab8c051892c9db7f4ab0ed877c1c8d28371af30750b2924b562938d6060c2ce7",
     "nr-delivery-gate.mdc": "5bdb8e13bd40f33c8b8dc2ce963b2b6f47f74d14d14d33a9e763c28d6a615a18",
-    "nr-git-workflow.mdc": "881ca2d7f3588165518af55e1d14f1ddb064e17df2d42da746df9913228891db",
+    "nr-git-workflow.mdc": "6df55554ef46adc032fedfad77d74d023b703c984837a8f24fea0ed9ca184fb0",
     "nr-rules-maintenance.mdc": "f8893145ee6be346a658fddb099d9c295d8e68626ba0e4cebf4ca9637256d5f0",
     "nr-unattended-workflow.mdc": "cc803db45035f068c2e92059fa38041ea0d81cd0b1ac3178ddd6f7fb7868cd27"
   },
-  "installed_package_sha256": "6085320846deb7541967e89b08c98e310e5fffbb24bb0e06a5f16d4733cf0986",
+  "installed_package_sha256": "696814bbab8aba65d1eb6f832f5673227b72de02201c23e2602b09ab4658a6b2",
   "packs": [
     "agent-model-router",
     "agent-session-kits",
@@ -51,9 +51,9 @@
   ],
   "rule_filename_prefix": "nr-",
   "schema_version": 4,
-  "source_commit": "736416167a2b17812e95e1f87359847d1ca0a186",
+  "source_commit": "abb1b51f739fd10ffd2fd1b3ff294926211985ce",
   "source_dirty": false,
-  "source_package_sha256": "6085320846deb7541967e89b08c98e310e5fffbb24bb0e06a5f16d4733cf0986",
+  "source_package_sha256": "696814bbab8aba65d1eb6f832f5673227b72de02201c23e2602b09ab4658a6b2",
   "source_path": "/Users/dingping/XCodeProjects/engineering-agent-rules",
   "source_url": "https://github.com/haoxf/engineering-agent-rules.git",
   "template_overrides": {}
