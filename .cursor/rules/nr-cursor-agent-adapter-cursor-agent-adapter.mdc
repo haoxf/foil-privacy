@@ -1,0 +1,60 @@
+---
+description: Cursor Agent adapter——同步执行或只读审查合格叶子并返回最小事实收据
+alwaysApply: false
+---
+
+# Cursor Agent Adapter
+
+本 pack 只负责安全调用 Cursor CLI、model receipt 和工作区事实审计。writer / Reviewer 的能力下限、评分、额度池及 Review 责任由[统一模型路由](nr-agent-model-router-model-routing.mdc)在上层决定；Cursor 宿主禁止递归调用 adapter，直接使用自己的 root/subagent。
+
+## 何时派发 writer
+
+R1/R2 在需求、验收、产品/架构选择和根因完成后，只把自然形成、写域可冻结、有直接 oracle、无其他 writer 的叶子交给 Cursor。R0 不为 Cursor 拆票。已有 active runtime ticket 时沿用票面，没有时只临时冻结 `goal`、`acceptance`、`non-goals`、allowed write paths、oracle、required tier、评分最低值、repository/worktree/branch/HEAD 和禁止的 Git/外部动作；不得为了 adapter 新建 runtime。
+
+并发/生命周期、安全/权限/隐私、密码学、持久化/迁移、产品/架构、测试与生产路径不同或根因未明时不能因文件少降档；主 Agent 先冻结判断边界，再由 router 选择合格 Cursor 模型或回退。不得为了弱模型人为拆票或回调评分门槛。
+
+## 同步 writer 调用
+
+先运行 `preflight`，只检查 CLI、登录和 Auto 可见性；ready 不代表额度。主 Agent 用 router 的 `recommended` 填入模型和来源，再通过 stdin 发送冻结简报：
+
+```text
+run --repo ROOT --allowed-write-path PATH --required-tier weak|medium|strong
+    --assessed-tier weak|medium|strong
+    --receipt-key OPAQUE_ROUTER_KEY
+    --quota-pool cursor_first_party|cursor_api
+    --model MODEL --model-source auto|third_party|cursor_native
+```
+
+wrapper 使用 `--print --force --trust --sandbox enabled --output-format stream-json` 前台等待本次进程组；prompt 不进 argv、stdout 或 receipt。根进程成功终态后只留短暂退出宽限，逾期停止本组；收到终态仍不退出视为可能写入失败。简报禁止 commit、切分支、push/PR、扩 scope 和写 runtime。
+
+stderr 只输出固定阶段、计数和每 25 秒心跳；stdout 只输出一份 JSON receipt。不得转发 prompt、模型正文、工具参数、路径、diff 或 Cursor 原始输出。显式模型、来源、`assessed-tier`、opaque `receipt-key` 与 `quota-pool` 必须逐字来自本次 router 的同一 `recommended`；adapter 不维护第二份模型名→tier、模型名→额度池或别名归一化表。system init 形成 model receipt，共享 identity 工具核对失败时 `model_receipt_mismatch`，router 评定 tier 低于要求时 `insufficient_model_tier`。
+
+根进程正常退出、唯一成功终态、tier 足够、进程组安静、Git 未漂移且非空 delta 全在 allowed paths，才返回 `candidate_ready` 和 `upper_review_required: true`。这里的 ready 只表示“可交上层审查”，不表示已通过 Review 或可交付。无改动、协议错、非零退出、超时、进程组未安静、HEAD/branch/index/staged 漂移、越界或新 symlink 均不成候选。
+
+## 显式只读 Review
+
+router 为稳定候选选择 Cursor Reviewer 时，上层单独调用：
+
+```text
+review --repo ROOT --required-tier weak|medium|strong
+       --assessed-tier weak|medium|strong
+       --receipt-key OPAQUE_ROUTER_KEY
+       --quota-pool cursor_first_party|cursor_api
+       --model MODEL --model-source auto|third_party|cursor_native
+```
+
+该子命令以 `--mode plan --sandbox enabled` 启动新的 Cursor 根 Agent，不带 `--force`，并要求终态为 `AGENT_MODEL_REVIEW: PASS|BLOCKED|UNAVAILABLE`。Reviewer 必须与 writer 是不同 Agent，读取冻结验收、实际 diff、生产路径和验证；同模型只会被 router 降低优先级，不替代身份隔离。任何文件 delta、Git 漂移、tier 不足、非唯一/非最终 marker、BLOCKED 或 UNAVAILABLE 都不能 `review_passed`。
+
+finding 仅在违反验收、支持环境可复现、直接生产路径错误、明确安全/数据/状态/生命周期/并发风险或阻塞真实使用时阻塞；风格、范围外重构和顺便优化 deferred。修复仍由原 writer 在原封套内完成，上层对新 fingerprint 重派 closure；adapter 自身不嵌套 Reviewer，也不决定审查轮数。
+
+## 最小工作区审计
+
+前后比较 HEAD、branch、staged diff 与 tracked/non-ignored untracked。允许已有 dirty baseline，但只把相对 delta 计入 `changed_paths`。allowed path 必须是 repo-relative 正规路径，不穿 symlink 或进入 `.git` / `.agent-task-runtime`；只接受相等或 `/` 子路径。
+
+审计不覆盖 ignored、hard-link alias 或隐藏 index flag；sandbox 只是补充，不能防同一 euid 恶意主体。ignored 生成物由项目 oracle 取证，不靠 adapter receipt。
+
+## 额度错误与回退
+
+Cursor/评分/Codex 额度都由 router 的全局异步缓存处理；adapter 不在每次执行前查询网络，只有 `cache.fresh: true` 的耗尽事实能在调用前硬停池。真实 Cursor quota/rate-limit 优先于缓存：adapter 在返回收据前自动安全失效 Cursor 缓存，下一次 router 读取会立即返回当前可用事实并异步刷新；上层不删除缓存文件。Auto/Composer/Cursor Grok 错误只在本任务停用 `cursor_first_party`，其它显式模型错误只停用 `cursor_api`；认证错误才停用整个 Cursor。收据显式返回 `quota_pool_id`；可能写入的失败必须先审计，不能自动重派或清理。
+
+TLS/SSL/HTTP2/连接重置仅在进程组安静、Git 未漂移且零 delta 时同模型重试一次，再失败回退本票。`fallback_before_write` 才允许换执行端；`failed_after_possible_write` 必须人工核候选事实。adapter 不保存 task-local mode、handoff 或历史，新票重新读取 router 结果。

@@ -1,0 +1,154 @@
+{
+  "$id": "https://engineering-agent-rules.local/schemas/agent-task-runtime/task-envelope.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lean agent task envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "task_id", "title", "goal", "acceptance", "non_goals",
+    "write_paths", "run_verification", "git_policy", "context", "tickets"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "task_id": {"$ref": "#/$defs/identifier"},
+    "title": {"$ref": "#/$defs/nonEmptyString"},
+    "goal": {"$ref": "#/$defs/nonEmptyString"},
+    "acceptance": {"$ref": "#/$defs/nonEmptyStringArray"},
+    "non_goals": {"$ref": "#/$defs/stringArray"},
+    "write_paths": {"$ref": "#/$defs/nonEmptyPathArray"},
+    "run_verification": {"$ref": "#/$defs/commands"},
+    "git_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "branch_mode", "target_branch", "return_branch", "commit_policy", "integration_mode"
+      ],
+      "properties": {
+        "branch_mode": {"enum": ["reuse_current", "create_task_branch"]},
+        "target_branch": {
+          "oneOf": [{"$ref": "#/$defs/nonEmptyString"}, {"type": "null"}]
+        },
+        "return_branch": {
+          "oneOf": [{"$ref": "#/$defs/nonEmptyString"}, {"type": "null"}]
+        },
+        "commit_policy": {"enum": ["none", "verified_ticket_commits"]},
+        "integration_mode": {"enum": ["no_integration", "ff_only_back"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"branch_mode": {"const": "reuse_current"}}},
+          "then": {
+            "properties": {
+              "target_branch": {"type": "null"},
+              "return_branch": {"type": "null"},
+              "integration_mode": {"const": "no_integration"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"branch_mode": {"const": "create_task_branch"}}},
+          "then": {
+            "properties": {
+              "target_branch": {"$ref": "#/$defs/nonEmptyString"},
+              "return_branch": {"$ref": "#/$defs/nonEmptyString"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"integration_mode": {"const": "ff_only_back"}}},
+          "then": {"properties": {"commit_policy": {"const": "verified_ticket_commits"}}}
+        }
+      ]
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository", "worktree", "branch_or_detached", "base_head",
+        "dirty_included", "dirty_excluded"
+      ],
+      "properties": {
+        "repository": {"$ref": "#/$defs/absolutePath"},
+        "worktree": {"$ref": "#/$defs/absolutePath"},
+        "branch_or_detached": {"$ref": "#/$defs/nonEmptyString"},
+        "base_head": {"$ref": "#/$defs/nonEmptyString"},
+        "dirty_included": {"$ref": "#/$defs/pathArray"},
+        "dirty_excluded": {"$ref": "#/$defs/pathArray"}
+      }
+    },
+    "tickets": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 6,
+      "items": {"$ref": "#/$defs/ticket"}
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,95}$"
+    },
+    "nonEmptyString": {
+      "type": "string", "minLength": 1, "pattern": "^\\S(?:.*\\S)?$"
+    },
+    "nonEmptyStringArray": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/nonEmptyString"}
+    },
+    "stringArray": {
+      "type": "array", "uniqueItems": true,
+      "items": {"$ref": "#/$defs/nonEmptyString"}
+    },
+    "absolutePath": {
+      "allOf": [{"$ref": "#/$defs/nonEmptyString"}, {"pattern": "^/"}]
+    },
+    "path": {
+      "allOf": [
+        {"$ref": "#/$defs/nonEmptyString"},
+        {"not": {"pattern": "(^/|\\\\|(^|/)\\.\\.?(/|$)|^\\.git(/|$)|^\\.agent-task-runtime(/|$)|/$)"}}
+      ]
+    },
+    "pathArray": {
+      "type": "array", "uniqueItems": true,
+      "items": {"$ref": "#/$defs/path"}
+    },
+    "nonEmptyPathArray": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/path"}
+    },
+    "argv": {
+      "type": "array", "minItems": 1,
+      "items": {"$ref": "#/$defs/nonEmptyString"}
+    },
+    "commands": {
+      "type": "array", "minItems": 1,
+      "items": {"$ref": "#/$defs/argv"}
+    },
+    "ticket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "title", "goal", "acceptance", "non_goals", "write_paths",
+        "depends_on", "verification", "stop_conditions", "risk"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "title": {"$ref": "#/$defs/nonEmptyString"},
+        "goal": {"$ref": "#/$defs/nonEmptyString"},
+        "acceptance": {"$ref": "#/$defs/nonEmptyStringArray"},
+        "non_goals": {"$ref": "#/$defs/stringArray"},
+        "write_paths": {"$ref": "#/$defs/nonEmptyPathArray"},
+        "depends_on": {
+          "type": "array", "uniqueItems": true,
+          "items": {"$ref": "#/$defs/identifier"}
+        },
+        "verification": {"$ref": "#/$defs/commands"},
+        "stop_conditions": {"$ref": "#/$defs/nonEmptyStringArray"},
+        "risk": {
+          "type": "object", "additionalProperties": false,
+          "required": ["required_tier"],
+          "properties": {"required_tier": {"enum": ["weak", "medium", "strong"]}}
+        }
+      }
+    }
+  }
+}

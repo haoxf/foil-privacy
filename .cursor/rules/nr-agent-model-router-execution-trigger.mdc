@@ -1,0 +1,10 @@
+---
+description: 统一模型路由——按能力下限、权威评分与共享额度池选择 writer / Reviewer
+alwaysApply: true
+---
+
+# 统一模型路由
+
+需要选择 writer 或 Reviewer 时，主 Agent 先冻结任务类、`required_tier` 和各评分维度最低值，再调用[模型路由协议](nr-agent-model-router-model-routing.mdc)；只声明能力需求，不点名新模型。脚本先对 Cursor 账户模型与本机实际开启项求交集，再结合全局第二层评分卡及 Cursor/Codex/Spark 额度池返回首选与备选。
+
+过期缓存立即用于本次判断并异步刷新；只有新鲜缓存或真实运行错误可硬停池。写入候选必须由上层统一 Review 后才能交付，adapter 的 `candidate_ready` 只表示可审候选。

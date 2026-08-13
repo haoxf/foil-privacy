@@ -1,0 +1,15 @@
+---
+description: 多 Agent 简报——委派前按已安装 multi-agent-brief 模板填有界字段；有模板不强制开子 Agent
+alwaysApply: false
+---
+
+# 多 Agent 简报
+
+启动实现、根因、Review、探索或 verify-only 子 Agent **之前**：
+
+1. 打开 `.engineering-agent-rules/templates/agent-session-kits/multi-agent-brief.md`。
+2. 填齐 Role、Goal、Context pointers、Allowed、Ownership、Forbidden、Output、Stop；小任务可合并简写中间三项，但 Goal / Context pointers / Output / Stop 不得空。
+3. 遵守模板与[多 Agent 委派](nr-agent-delegation.mdc)的指针优先软预算：不贴完整会话、大 diff、大日志。
+4. **有本模板不等于必须委派**；是否开子 Agent 仍按[Agent 工作流](nr-agent-workflow.mdc)。不要为了「用模板」而额外开 Agent。
+
+输出契约以共享 Agent 工作流 / 委派 / 交付门禁为准；模板仅提供可粘贴字段表。项目测试映射与旁路账本走项目私有路由，不要写进简报正文。

@@ -1,0 +1,104 @@
+{
+  "$id": "https://engineering-agent-rules.local/schemas/agent-task-runtime/run-state.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lean agent task state v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "task_id", "task_digest", "state", "owner",
+    "active_ticket", "tickets", "initial_snapshot", "baseline_snapshot", "run_result"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "task_id": {"$ref": "#/$defs/identifier"},
+    "task_digest": {"$ref": "#/$defs/digest"},
+    "state": {"enum": ["planned", "armed", "active", "complete"]},
+    "owner": {"oneOf": [{"$ref": "#/$defs/nonEmptyString"}, {"type": "null"}]},
+    "active_ticket": {"oneOf": [{"$ref": "#/$defs/identifier"}, {"type": "null"}]},
+    "tickets": {
+      "type": "array", "minItems": 2, "maxItems": 6,
+      "items": {"$ref": "#/$defs/ticketState"}
+    },
+    "initial_snapshot": {"oneOf": [{"$ref": "#/$defs/snapshot"}, {"type": "null"}]},
+    "baseline_snapshot": {"oneOf": [{"$ref": "#/$defs/snapshot"}, {"type": "null"}]},
+    "run_result": {"oneOf": [{"$ref": "#/$defs/result"}, {"type": "null"}]}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,95}$"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nonEmptyString": {"type": "string", "minLength": 1, "pattern": "^\\S(?:.*\\S)?$"},
+    "file": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/nonEmptyString"},
+        "sha256": {"oneOf": [{"$ref": "#/$defs/digest"}, {"const": "deleted"}]}
+      }
+    },
+    "snapshot": {
+      "type": "array", "items": {"$ref": "#/$defs/file"}
+    },
+    "candidate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["fingerprint", "files"],
+      "properties": {
+        "fingerprint": {"$ref": "#/$defs/digest"},
+        "files": {"$ref": "#/$defs/snapshot"}
+      }
+    },
+    "check": {
+      "type": "object", "additionalProperties": false,
+      "required": ["argv", "returncode", "output_sha256"],
+      "properties": {
+        "argv": {
+          "type": "array", "minItems": 1,
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        },
+        "returncode": {"const": 0},
+        "output_sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "review": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "reviewer", "provider", "model", "tier",
+        "candidate_fingerprint", "conclusion", "findings", "counterexample"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "reviewer": {"$ref": "#/$defs/nonEmptyString"},
+        "provider": {"$ref": "#/$defs/nonEmptyString"},
+        "model": {"$ref": "#/$defs/nonEmptyString"},
+        "tier": {"enum": ["weak", "medium", "strong"]},
+        "candidate_fingerprint": {"$ref": "#/$defs/digest"},
+        "conclusion": {"const": "passed"},
+        "findings": {
+          "type": "array", "uniqueItems": true,
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        },
+        "counterexample": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["candidate", "checks", "review"],
+      "properties": {
+        "candidate": {"$ref": "#/$defs/candidate"},
+        "checks": {
+          "type": "array", "minItems": 1,
+          "items": {"$ref": "#/$defs/check"}
+        },
+        "review": {"$ref": "#/$defs/review"}
+      }
+    },
+    "ticketState": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "state", "result"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "state": {"enum": ["pending", "active", "complete"]},
+        "result": {"oneOf": [{"$ref": "#/$defs/result"}, {"type": "null"}]}
+      }
+    }
+  }
+}

@@ -1,0 +1,62 @@
+---
+description: 可选任务运行时——对齐复杂任务、逐票验证并保持长会话方向稳定
+alwaysApply: false
+---
+
+# Agent Task Runtime
+
+本 pack 是强化路径中需要持久多票治理的轻量执行清单，不是普通多步骤任务的默认入口，也不是聊天记录系统。它低于 core 工作流、Git、委派与交付门禁；controller 负责调度，runtime 只保存冻结任务、当前进度和已通过的检查/审查摘要。
+
+## 自然入口与授权
+
+任务只有已选择 R2 强化路径，且需要 2–6 个可独立验收的持久实现票或长会话续接时才进入。必需的 Reviewer/根因 Agent 不算 runtime 所需的多 Agent 调度；多文件、跨模块、有限步骤及单个内聚 strong 改动按所选路径直接推进。用户显式要求 runtime 视为选择强化路径，但仍须满足持久多票或续接条件。先读仓库和适用规则，只询问真正的产品选择。
+
+对齐时先找可能推翻整体方案的外部条件。签名/provisioning、Secure Enclave、权限、设备、外部服务、数据库、上游 API、工具链、UI/窗口/Space 或真实运行环境仍不确定时，第一张有意义的票必须用最小真实宿主完成能代表产品路径的探针或纵向 smoke；只证明进程握手、纯函数或测试替身不足以替代用户可见链路。证明可行后才展开完整实现，不得留到最终验证首次触碰。
+
+对齐完成后自动建立 envelope，并用 `TASK ARMED` 展示：goal、acceptance、non-goals、2–6 张票、依赖、写域、可观察验证、required tier、停止条件、Git policy 和当前 repository/worktree/branch/base HEAD。票面的 `risk.required_tier` 仍是 runtime 必填的能力下限；另为每张票临时展示首选执行端、建议推理强度和一句理由，实际执行可选择同档或更高档。Cursor adapter 不可用时写明回退原因，不得静默改变档位。写域按最窄职责边界冻结，不机械枚举文件；可预见的同职责 sibling 源码可预先纳入，但不得默认预留测试文件。方案或共享契约变化必须重建并重新 arm。
+
+若项目已安装并配置 Swift 类型体量门禁，只要某票写域可能覆盖 profile 的 `source_roots`，controller 就须把使用冻结 `context.base_head` 的检查器 argv 写入该票 verification；只有写域与所有 source root 可证明不相交时才可省略。多票会累计修改同一核心类型时，结构工作须并入可能首次越限的功能票，或安排在首次预计触发门禁之前；只有此前每张中间候选都能独立过闸时，结构票才可后置。不在票全部关闭后临时追加状态。
+
+只有 armed 后用户下一条消息原样整段等于 `开始执行` 才可 start。未 armed 时的“开始执行”只推进对齐和 arm；“可以”“继续”、附言或前后空白不算授权。授权仅覆盖冻结 envelope 内的本地实现、验证、独立 Review，以及 Git policy 明列且 core Git 规则允许的本地动作；不授权 worktree、push、PR、发布或其他外部动作。
+
+## 状态与续接
+
+每个 task 仅保存 `.agent-task-runtime/tasks/<task-id>/task.json` 与 `state.json`：
+
+```text
+planned -> armed -> active -> complete
+```
+
+`list` 只读列出任务摘要。零个未完成任务时正常对齐新任务；一个时自动 `status`，校验当前仓库后续接；多个时列出 id/title/state 让用户选择，不猜。已 complete 任务若后来发生代码漂移，status 返回 `STALE_CANDIDATE`、list 标为 `stale_after_complete`，但它仍是终态而不冒充可续接任务；后续修改建立新任务，交付时也不得沿用旧 gate。
+
+同一 owner 可直接继续。controller 主动交接时先 `release`，新 owner 再 `resume`；旧 owner 未 release 的异常接管必须取得用户下一条原样整段 `重新开始任务`。它只转移 owner，不复活旧候选或旧检查。跨仓交接只给目标仓路径、必要时给 task id，并让用户在目标仓说“继续现有任务”；不得复制 digest、base HEAD、票面和验收组成长提示词。接收端以本仓 `list/status` 为唯一真源：唯一未完成且 owner 为空时自动 `resume`；若仍为 armed，精简展示 `TASK ARMED` 后继续等待精确 `开始执行`。损坏状态不提供迁移、修复或兼容壳，先停手并人工备份后重建任务。
+
+`.agent-task-runtime` 只包含显式 runtime task，不包含聊天全文和普通小任务；项目应把目录加入 `.gitignore`。安装、update、remove 不读取或迁移消费者状态。
+
+## 逐票循环
+
+controller 按依赖推进唯一 active ticket：
+
+1. 读取票面 goal/acceptance/non-goals/write paths/verification/required tier；超出票面或遇停止条件就停为 replan，不暗改 envelope。
+2. `risk.required_tier` 是当前票 writer 的最低执行档位，不是第四种风险分类；最终 strong Review 也不倒推所有票为 strong。`weak`/`medium` 只做已冻结、窄写域且有直接 oracle 的叶子；oracle 可为现有测试、编译/静态检查、一次性脚本、CLI/App/Simulator/真实系统实跑、截图、日志或人工 smoke，不等于新增永久测试。跨 async callback 状态、并发/生命周期、安全/权限/隐私、密码学、持久化/迁移、跨进程/跨仓契约、产品/架构判断或根因未明时必须 `strong`，不得因文件少降级。
+3. 实现后读取 `status.candidate_preview`。改动超出当前票写域时为 `STALE_CANDIDATE`，先恢复一致或 replan。
+4. 当前候选实际改动 profile `source_roots` 内的 Swift 文件时，先对同一 fingerprint 做 Swift 类型体量门禁的 Review 前预检；默认只保留紧凑摘要，失败定位具体类型时才读取所需局部明细。预检失败不得冻结 Review 或关闭票：先做自然、内聚的职责修复，**不得自动抽取 Helper** 只为压低数字。若唯一合理修复需要冻结写域外的 sibling 文件，说明票面过窄，须在写外部文件前停为 replan；不得把“当前票不允许新文件”当作保留超大类型或申请豁免的架构理由。重建 envelope 时也不得把已有脏候选吸进新 baseline 后宣称已受 runtime 覆盖；现有工具无法保留原始候选边界时须停下说明。确无自然职责可拆时才可请求受限豁免。
+5. writer 先完成有界候选和直接 oracle，再冻结 fingerprint。weak/medium 叶子由 controller 沿真实生产路径检查并可直接提供 review record，不逐票启动独立 Reviewer；strong、安全、并发、持久化、跨进程/跨仓契约和不可逆票须由实际 writer 之外、tier 足够的 Reviewer 独立审查。Reviewer 记录 provider/model、结论、findings 和一个与当前生产路径相关的主动反例；反例默认一次性验证，不自动进入测试集。阻塞标准与 deferred 边界遵循[交付门禁](nr-delivery-gate.mdc)。finding 修复只做聚焦 closure；只有共享契约、核心假设、依赖图或候选边界变化才整体失效。writer 独立性由 controller 根据 receipt 保证，runtime 不保存自报字段。
+6. `close-ticket` 先验证 Review 绑定，再以 argv + `shell=False` 重跑票面命令；检查期间候选变化即失败。成功后只写一份 ticket result，更新 baseline 并激活下一 ready ticket。
+
+票全部完成后，`close-run` 对 initial→current 的稳定完整候选执行 run verification 和一次独立 strong Review；不得为同一候选再启动第二轮泛化审查。若最后一张 strong 票与 full candidate 同时冻结，同一次 Reviewer 调用可分别产出两个 fingerprint 绑定摘要，不重复审人。适用的机器硬门禁留在 run verification 最终兜底，但不应第一次发现相关票问题。局部非阻塞 finding deferred；阻塞 finding 若只涉及未关闭票，仅修相关范围并聚焦复核。若必须修改已关闭票，clean-break v1 不支持 reopen/amend：须 fail-closed 停止并说明原 run 不能 complete，不新建 run 吸收既有候选，也不重开或重跑无关票。候选漂移或验证失败不能过闸；`RUN_GATE_COMPLETE` 只表示候选过闸，不代表 Git 集成完成。
+
+子 Agent 不写 runtime：它只返回实现或 Review 结果给 controller。没有适用路径要求的审查或有效 oracle 时不得通过 runtime gate。
+
+## Git 与边界
+
+runtime 不创建 worktree、不创建/切换分支、不 commit/merge/push。`git_policy` 只冻结允许范围；执行端仍须遵守 core Git 与交付门禁：
+
+- 当前分支已是本任务分支时优先 `reuse_current`；否则可在 arm 前选择 `create_task_branch`。创建任务分支时 integration mode 默认 `ff_only_back`，并冻结 `return_branch` 及其当时指向的 `context.base_head`；只有用户明确要求保留分支、走 PR 或不集成，才可选 `no_integration`。创建 worktree 始终单独向用户确认。
+- `verified_ticket_commits` 只允许在当前票已经 `close-ticket`、候选未漂移且能精确 stage owned changes 后做 checkpoint commit。
+- `ff_only_back` 在 `RUN_GATE_COMPLETE` 后仍必须完成：冻结任务 HEAD，使用 `git worktree list --porcelain` 定位已检出 `return_branch` 的 worktree，重验任务与 return worktree 均无未纳入改动、return HEAD 仍等于冻结的 `context.base_head`、任务 HEAD 是其后代，再在 return worktree 执行唯一允许的 `merge --ff-only <task-head>`。随后必须用 `git merge-base --is-ancestor <task-head> <return_branch>` 成功验证 return branch 包含冻结任务 HEAD，才能宣称任务完成。
+- 无法 fast-forward、`return_branch`/任务 HEAD 漂移、return worktree 不干净、分支被其他 worktree 占用且无法在原位安全更新，或出现冲突时，报告 `integration pending` 并停止；不得宣称完成，也不得自动 rebase、普通 merge、stash、reset、删 worktree、删分支或 push。
+
+## 明确不做
+
+不做旧格式迁移、operation log、generation CAS、candidate epoch、四类 manifest、attachment token、后台 daemon、数据库、加密证明、Agent 平台、worktree 自动化或聊天长期记忆。状态依赖本地文件锁与原子替换；目标是让强化多票任务靠直接 oracle 与按风险审查稳定推进，而不是模拟分布式调度系统。

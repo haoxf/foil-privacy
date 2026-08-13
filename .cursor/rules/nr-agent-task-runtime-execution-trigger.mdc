@@ -1,0 +1,12 @@
+---
+description: 任务运行时路由——强化持久多票对齐与续接
+alwaysApply: true
+---
+
+# Runtime
+
+仅当任务已选 R2 强化路径且确需 2–6 张持久实现票或长会话续接时，写生产前加载[协议](nr-agent-task-runtime-task-runtime.mdc)。Reviewer/根因 Agent 不计为触发；多文件、跨模块、有限步骤及单个内聚 strong 改动旁路。显式要求 runtime 视为选择强化路径，仍须满足前述条件。
+
+新会话续接时在当前 repo 调用 `list`；零/一/多未完成任务分别对齐新任务、自动 status、用户选择。旧 task 不劫持普通请求。
+
+仅 armed 后紧邻的精确 `开始执行`，或异常接管的精确 `重新开始任务` 才加载 mutation。模糊同意、附言或方案漂移不授权。
