@@ -5,6 +5,6 @@ alwaysApply: true
 
 # 统一模型路由
 
-选择 writer/Reviewer 前冻结 `task_class`、`required_tier`、独立 `reasoning_depth` 与真实评分最低值，再按[模型路由协议](nr-agent-model-router-model-routing.mdc)调用脚本。省略 `--prefer-provider` 时脚本读取本机全局偏好；用户对当前任务明确指定后每次传对应值并覆盖全局默认。脚本返回最低充分深度的候选，偏好/额度不能把 High 升到 XHigh/Max。
+选择 writer/Reviewer 前冻结 `task_class`、`required_tier`、独立 `reasoning_depth` 与评分最低值，再按[模型路由协议](nr-agent-model-router-model-routing.mdc)调用脚本。省略 `--prefer-provider` 时读取本机全局偏好；用户明确指定后每次传入并覆盖默认。脚本返回宿主允许且对方可用的最低充分深度候选；不能自己调自己，偏好/额度不能把 High 升到 XHigh/Max。
 
-过期缓存立即用于本次判断并异步刷新；只有新鲜缓存或真实运行错误可硬停池。写入候选必须由上层统一 Review 后才能交付，adapter 的 `candidate_ready` 只表示可审候选。
+过期缓存立即用于本次判断并异步刷新；只有新鲜缓存或真实运行错误可硬停池。写入候选须上层统一 Review 后才能交付，adapter 的 `candidate_ready` 只表示可审候选。

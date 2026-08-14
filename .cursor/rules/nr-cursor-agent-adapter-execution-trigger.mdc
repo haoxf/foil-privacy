@@ -5,6 +5,6 @@ alwaysApply: true
 
 # Cursor adapter
 
-Cursor 宿主禁止调用 adapter。Codex 经[统一路由](nr-agent-model-router-model-routing.mdc)选中 Cursor、全局策略允许 adapter，且写域/oracle 可冻结、无 writer、preflight 可用时加载[协议](nr-cursor-agent-adapter-cursor-agent-adapter.mdc)；R0 不为 Cursor 拆票。
+Cursor 宿主禁止调用 adapter。Codex 经[统一路由](nr-agent-model-router-model-routing.mdc)选中且收据 `executor` 为 `cursor_agent`、策略允许、写域/oracle 可冻结、无 writer、preflight 可用时加载[协议](nr-cursor-agent-adapter-cursor-agent-adapter.mdc)；`cursor_session` 须用指定模型开 Task。R0 不为 Cursor 拆票。
 
 `candidate_ready` 只是待审候选，上层须完成独立 Review；判断未冻结或工具不可用时旁路。

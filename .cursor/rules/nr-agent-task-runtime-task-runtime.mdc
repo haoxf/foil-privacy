@@ -13,7 +13,7 @@ alwaysApply: false
 
 对齐时先找可能推翻整体方案的外部条件。签名/provisioning、Secure Enclave、权限、设备、外部服务、数据库、上游 API、工具链、UI/窗口/Space 或真实运行环境仍不确定时，第一张有意义的票必须用最小真实宿主完成能代表产品路径的探针或纵向 smoke；只证明进程握手、纯函数或测试替身不足以替代用户可见链路。证明可行后才展开完整实现，不得留到最终验证首次触碰。
 
-对齐完成后自动建立 envelope，并用 `TASK ARMED` 展示：goal、acceptance、non-goals、2–6 张票、依赖、写域、可观察验证、required tier、reasoning depth、停止条件、Git policy 和当前 repository/worktree/branch/base HEAD。票面的 `risk.required_tier` 与 `risk.reasoning_depth` 都是 runtime 必填真源：前者是跨 provider 能力下限，后者是 `economy | standard | deep | maximum` 推理投入下限。实际执行须选择最低充分深度；Cursor adapter 不可用时写明回退原因，不得静默改变任何一轴。写域按最窄职责边界冻结，不机械枚举文件；可预见的同职责 sibling 源码可预先纳入，但不得默认预留测试文件。方案或共享契约变化必须重建并重新 arm。
+对齐完成后自动建立 envelope，并用 `TASK ARMED` 展示：goal、acceptance、non-goals、2–6 张票、依赖、写域、可观察验证、required tier、reasoning depth、停止条件、Git policy 和当前 repository/worktree/branch/base HEAD。票面的 `risk.required_tier` 与 `risk.reasoning_depth` 都是 runtime 必填真源：前者是跨 provider 能力下限，后者是 `economy | standard | deep | maximum` 推理投入下限。实际执行须选择最低充分深度。Cursor adapter 不可用只禁止再拉起 Cursor，不隐藏 Cursor 宿主上指定模型的 Task 候选；对方运行时不可用时写明回退原因，不得静默改变任何一轴。写域按最窄职责边界冻结，不机械枚举文件；可预见的同职责 sibling 源码可预先纳入，但不得默认预留测试文件。方案或共享契约变化必须重建并重新 arm。
 
 若项目已安装并配置 Swift 类型体量门禁，只要某票写域可能覆盖 profile 的 `source_roots`，controller 就须把使用冻结 `context.base_head` 的检查器 argv 写入该票 verification；只有写域与所有 source root 可证明不相交时才可省略。多票会累计修改同一核心类型时，结构工作须并入可能首次越限的功能票，或安排在首次预计触发门禁之前；只有此前每张中间候选都能独立过闸时，结构票才可后置。不在票全部关闭后临时追加状态。
 

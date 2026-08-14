@@ -17,6 +17,7 @@ from typing import Any, Callable
 import codex_usage
 import cursor_model_selection
 import dispatch_policy
+import host_policy
 from model_identity import (
     canonical_model_key, effort_from_model_identity, receipt_model_key,
 )
@@ -227,7 +228,6 @@ def _cursor_candidates(
     models: list[dict[str, str]], scorecard: dict[str, Any],
     *, task_class: str,
 ) -> list[dict[str, Any]]:
-    scores = _score_index(scorecard)
     candidates: list[dict[str, Any]] = []
     for live in models:
         if live["model_id"] == "auto":
@@ -251,9 +251,6 @@ def _cursor_candidates(
                 }
             )
             continue
-        scored = scores.get(live["canonical_key"])
-        if scored is None:
-            continue
         try:
             effort = effort_from_model_identity(
                 live["model_id"], live["display_name"]
@@ -262,6 +259,11 @@ def _cursor_candidates(
             continue
         reasoning_depth = reasoning_depth_for_effort(effort)
         if reasoning_depth is None:
+            continue
+        scored = model_score_cache.lookup_scorecard_model(
+            live["canonical_key"], effort=effort, scorecard=scorecard,
+        )
+        if scored is None:
             continue
         task_score = scored.get("task_scores", {}).get(task_class)
         if type(task_score) not in (int, float):
@@ -292,7 +294,11 @@ def _cursor_candidates(
                     "task_score": float(task_score),
                     **scored.get("dimensions", {}),
                 },
-                "score_evidence": "derived_scorecard",
+                "score_evidence": (
+                    "thinking_inherited_from_non_thinking"
+                    if scored.get("score_resolution") == "thinking_inherited"
+                    else "derived_scorecard"
+                ),
                 "fast_variant": live["model_id"].endswith("-fast"),
             }
         )
@@ -389,16 +395,49 @@ def _codex_candidates(
     return candidates
 
 
+def _bind_cursor_executor(candidate: dict[str, Any], executor: str) -> dict[str, Any]:
+    bound = {**candidate, "executor": executor}
+    if executor == "cursor_session":
+        bound["requires_distinct_agent"] = True
+        bound["parent_session_unverified"] = True
+    return bound
+
+
 def _base_rank(candidate: dict[str, Any], *, task_class: str, purpose: str) -> float:
     executor = candidate["executor"]
     role = candidate.get("role")
+    cursor_executor = executor in {"cursor_agent", "cursor_session"}
+    # cursor_session 是指定 model_id 的 Task/子 Agent，不是父会话窗口。
     if task_class in {"exploration", "micro_edit"}:
-        base = 0.0 if candidate["pool_id"] == "codex_spark" else 20.0 if executor == "cursor_agent" else 40.0
+        base = 0.0 if candidate["pool_id"] == "codex_spark" else 20.0 if cursor_executor else 40.0
     elif purpose == "reviewer":
-        base = 0.0 if executor == "cursor_agent" else 10.0 if role in _REVIEWER_ROLES else 30.0
+        base = 0.0 if cursor_executor else 10.0 if role in _REVIEWER_ROLES else 30.0
     else:
-        base = 0.0 if executor == "cursor_agent" else 20.0 if role == "bounded_worker" else 40.0
+        base = 0.0 if cursor_executor else 20.0 if role == "bounded_worker" else 40.0
     return base
+
+
+def _preference_fallback_reason(
+    preferred_provider: str, dispatch: dict[str, Any],
+) -> str:
+    if preferred_provider == "cursor" and not host_policy.include_cursor(dispatch):
+        reason = (dispatch.get("cursor_adapter") or {}).get("reason")
+        if reason == "adapter_disabled":
+            return "Cursor adapter is disabled by the global dispatch policy"
+        if reason == "self_dispatch_forbidden":
+            return "self dispatch is forbidden on the Cursor host"
+        if reason == "host_unknown_adapter_forbidden":
+            return "host is unknown; Cursor adapter dispatch is forbidden"
+        if reason == "cli_missing":
+            return "Cursor Agent CLI is not available from the current host"
+        return "no Cursor dispatch path is available from the current host"
+    if preferred_provider == "codex" and not host_policy.include_codex(dispatch):
+        return "Codex CLI is not available from the current host"
+    return (
+        f"no eligible {preferred_provider} candidate at the minimum "
+        "sufficient reasoning depth satisfied capability, purpose, "
+        "score, and quota gates"
+    )
 
 
 def recommend(
@@ -409,6 +448,9 @@ def recommend(
     prefer_fast: bool = False,
     preferred_provider: str = "auto",
     cursor_adapter_enabled: bool = True,
+    host: str = "codex",
+    dispatch: dict[str, Any] | None = None,
+    which: Callable[[str], str | None] | None = None,
     minimum_scores: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     if (
@@ -417,8 +459,14 @@ def recommend(
         or reasoning_depth not in REASONING_DEPTH_LEVELS
         or purpose not in PURPOSES
         or preferred_provider not in PREFERRED_PROVIDERS
+        or not host_policy.is_host(host)
     ):
         raise ValueError("invalid routing request")
+    resolved_dispatch = dispatch or host_policy.probe_dispatch(
+        host=host,
+        cursor_adapter_enabled=cursor_adapter_enabled,
+        which=which or shutil.which,
+    )
     pools = _pool_facts(cursor_quota, codex_quota)
     minimums = minimum_scores or {}
     if set(minimums) - SCORE_DIMENSIONS:
@@ -427,13 +475,18 @@ def recommend(
         raise ValueError("score minimum must be a finite non-negative number")
     candidates: list[dict[str, Any]] = []
     if not (task_class == "root_cause" and purpose == "writer"):
-        if task_class != "root_cause" and cursor_adapter_enabled:
-            candidates = _cursor_candidates(
-                cursor_models, scorecard, task_class=task_class
+        cursor_executor = host_policy.cursor_executor(resolved_dispatch)
+        if task_class != "root_cause" and cursor_executor is not None:
+            candidates = [
+                _bind_cursor_executor(candidate, cursor_executor)
+                for candidate in _cursor_candidates(
+                    cursor_models, scorecard, task_class=task_class
+                )
+            ]
+        if host_policy.include_codex(resolved_dispatch):
+            candidates += _codex_candidates(
+                codex_roles, scorecard, task_class=task_class, purpose=purpose
             )
-        candidates += _codex_candidates(
-            codex_roles, scorecard, task_class=task_class, purpose=purpose
-        )
     eligible: list[dict[str, Any]] = []
     for candidate in candidates:
         pool = pools.get(candidate["pool_id"])
@@ -517,6 +570,7 @@ def recommend(
             "purpose": purpose,
             "minimum_scores": dict(sorted(minimums.items())),
             "preferred_provider": preferred_provider,
+            "host": host,
         },
         "recommended": recommended,
         "alternatives": eligible[1:5],
@@ -527,20 +581,15 @@ def recommend(
             "live_cursor_model_count": len(cursor_models),
         },
         "pools": sorted(pools.values(), key=lambda pool: pool["pool_id"]),
+        "dispatch": resolved_dispatch,
         "preference": {
             "requested": preferred_provider,
             "honored": preference_honored,
             "fallback_reason": (
                 None
                 if preferred_provider == "auto" or preference_honored
-                else (
-                    "Cursor adapter is disabled by the global dispatch policy"
-                    if preferred_provider == "cursor" and not cursor_adapter_enabled
-                    else (
-                        f"no eligible {preferred_provider} candidate at the minimum "
-                        "sufficient reasoning depth satisfied capability, purpose, "
-                        "score, and quota gates"
-                    )
+                else _preference_fallback_reason(
+                    preferred_provider, resolved_dispatch,
                 )
             ),
         },
@@ -554,6 +603,8 @@ def select(
     preferred_provider: str | None = None,
     minimum_scores: dict[str, float] | None = None,
     dispatch_policy_path: Path | None = None,
+    host: str | None = None,
+    which: Callable[..., str | None] | None = None,
 ) -> dict[str, Any]:
     policy = dispatch_policy.load_policy(dispatch_policy_path)
     effective_preference = (
@@ -562,6 +613,12 @@ def select(
         else policy["policy"]["provider_preference"]
     )
     adapter_enabled = policy["policy"]["cursor_adapter_enabled"] is True
+    resolved_host = host_policy.resolve_host(host)
+    dispatch = host_policy.probe_dispatch(
+        host=resolved_host["host"],
+        cursor_adapter_enabled=adapter_enabled,
+        which=which or shutil.which,
+    )
     account_models = live_cursor_models()
     cursor_selection = cursor_model_selection.read_enabled_model_families()
     enabled_models = cursor_model_selection.filter_enabled_cli_models(
@@ -581,9 +638,12 @@ def select(
         prefer_fast=prefer_fast,
         preferred_provider=effective_preference,
         cursor_adapter_enabled=adapter_enabled,
+        host=resolved_host["host"],
+        dispatch=dispatch,
         minimum_scores=minimum_scores,
     )
     result["dispatch_policy"] = policy
+    result["host"] = resolved_host
     result["preference"]["source"] = (
         "explicit_task" if preferred_provider is not None else "global_default"
     )
@@ -631,6 +691,12 @@ def _parser() -> argparse.ArgumentParser:
     choose.add_argument("--purpose", required=True, choices=sorted(PURPOSES))
     choose.add_argument("--writer-model")
     choose.add_argument("--prefer-fast", action="store_true")
+    choose.add_argument(
+        "--host",
+        choices=sorted(host_policy.HOSTS),
+        default=None,
+        help="当前 Agent 宿主；省略时从环境检测；无法识别则禁止 Cursor adapter",
+    )
     choose.add_argument(
         "--prefer-provider",
         choices=sorted(PREFERRED_PROVIDERS),
@@ -705,6 +771,7 @@ def main(argv: list[str] | None = None) -> int:
             writer_model=arguments.writer_model,
             prefer_fast=arguments.prefer_fast,
             preferred_provider=arguments.prefer_provider,
+            host=arguments.host,
             minimum_scores=minimum_scores,
         )
         code = 0 if result["recommended"] is not None else 2

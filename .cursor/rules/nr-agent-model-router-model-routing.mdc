@@ -18,7 +18,8 @@ router 的结构化候选是一次调度的唯一能力收据：adapter 与上�
 - `required-tier`：`weak | medium | strong` 能力下限。
 - `reasoning-depth`：`economy | standard | deep | maximum` 推理投入下限，与能力 tier 正交。对 Codex 固定角色分别映射到 Medium/Low 一类轻量 effort、High、XHigh、Max；Cursor 显式 variant 只从运行时 model id/display 的一致 effort 证据映射，无显式或冲突 effort 的静态模型 fail-closed 排除，Auto 只记 `economy`。脚本优先选择满足要求的最低深度，不能因 provider 偏好、额度、文件数或普通 strong 标签越级。
 - 零个或多个 `--min-score DIMENSION=MINIMUM`：模型必须逐项达到的机器证据。支持 `overall_score`、`task_score`、`cursorbench`、`deep_swe`、`frontier_code`、`terminal_bench`、`apex_agents`、`aa_intelligence`、`gdpval_aa`、`apex_swe`、`aa_briefcase`、`harvey_lab`。
-- `--prefer-provider auto|codex|cursor`：当前任务显式 provider 软优先；用户在当前任务说“优先使用 Codex/Cursor”后，后续每次 `select` 都传对应值，直到用户更改或取消，并覆盖全局默认。省略参数时读取 `~/.config/engineering-agent-rules/dispatch-policy.json`；文件缺失默认 `auto + adapter enabled`，损坏则安全降级为 `auto + adapter disabled` 并在收据标记 `invalid`。偏好只在已通过任务适用面、writer/reviewer、required tier、reasoning depth、逐维评分与额度门禁，且处于最低充分推理深度的候选之间改变排序，不能强行选用不合格、已耗尽或更深档 provider；回退时收据必须包含 `preference.honored=false` 与机器生成原因。
+- `--prefer-provider auto|codex|cursor`：当前任务显式 provider 软优先；用户在当前任务说“优先使用 Codex/Cursor”后，后续每次 `select` 都传对应值，直到用户更改或取消，并覆盖全局默认。省略参数时读取 `~/.config/engineering-agent-rules/dispatch-policy.json`；文件缺失默认 `auto + adapter enabled`，损坏则安全降级为 `auto + adapter disabled` 并在收据标记 `invalid`。偏好只在已通过任务适用面、writer/reviewer、required tier、reasoning depth、逐维评分与额度门禁，且处于最低充分推理深度、**当前宿主允许且对方运行时可用** 的候选之间改变排序，不能强行选用不合格、已耗尽、更深档或不可用的 provider；回退时收据必须包含 `preference.honored=false` 与机器生成原因。
+- `--host cursor|codex|unknown`：当前 Agent 宿主。省略时从环境检测：`CURSOR_AGENT` 为 Cursor，`CODEX_SANDBOX` / `CODEX_CI` 为 Codex；冲突或全无则 `unknown`。显式值覆盖检测。
 - `purpose=writer|reviewer`；Reviewer 另传 `--writer-model`，脚本会降低同模型优先级，但独立性的硬条件仍是不同 Agent 身份和稳定候选。
 
 ```sh
@@ -35,7 +36,13 @@ python3 .engineering-agent-rules/tools/agent-model-router/tools/dispatch_policy.
   --prefer-provider auto --cursor-adapter enabled
 ```
 
-`cursor_adapter_enabled=false` 高于 provider 偏好：router 不产生 Cursor 候选，adapter 自身也在启动前拒绝 writer/reviewer；它不退出 Cursor App、不影响用户直接使用 Cursor，也不中断已经运行的调用。偏好值继续保留，重新启用后恢复生效。当前任务显式 `--prefer-provider` 只能覆盖 provider 偏好，不能绕过 adapter 禁用。
+路由先识别宿主，再探测对方是否可调用，禁止再拉起**同一个**运行时：
+
+- Cursor 宿主产出 `cursor_session`：指定 `model_id` 的 Task / 子 Agent，**禁止** Cursor adapter（自己调自己）。这不是父会话窗口。Codex 仅当 `codex` CLI 可用时进入候选。
+- Codex 宿主产出 `codex_agent` 角色（本宿主）。Cursor adapter 仅当全局 `cursor_adapter_enabled=true` 且 `agent` CLI 可用时进入候选。
+- `unknown` 宿主禁止 adapter 和 Cursor 会话候选，避免误递归；Codex 仍仅在 CLI 可用时出现。
+
+`cursor_adapter_enabled=false` 只关掉 **Codex→Cursor adapter**，不删除 Cursor 宿主的会话模型，也不退出 Cursor App。当前任务显式 `--prefer-provider` 只能覆盖 provider 偏好，不能绕过自调禁止、对方 CLI 缺失或 adapter 禁用。偏好值在重新启用 adapter 后恢复生效。
 
 主 Agent 不应为了选中某个现有模型回调阈值。缺少指定维度即证据不足，不能用总分、厂商声称或名称补齐。`required-tier + reasoning-depth + task-class` 是普通路由输入；`--min-score` 只在某个公开 benchmark 维度本身就是本票真实能力要求时才传，不能把一组通用分数模板机械附到所有 complex/root-cause/Review，也不能因某档公开维度较完整就把任务升级到该推理档。评分卡回答“现有公开证据是否满足显式最低值”，不回答“本票应该使用 High、XHigh 还是 Max”。
 
@@ -50,7 +57,7 @@ Spark 没有与当前权威表同口径的公开分数，只能在 `exploration`
 1. `source` 是来源快照，保存固定 HTTPS 权威页面解析出的完整当前表格、版本/来源和抓取时间，不保存 HTML、cookie 或账户信息。
 2. `scorecard` 是路由评分卡，由纯脚本把第一层加工成 canonical model key、总体分、任务分、原始维度、成本和证据继承关系。Agent 与路由器只消费第二层。
 
-当前来源是 Cursor 官方 CursorBench 与官方模型对比页。多维数据可被同 family 的更高 effort 版本保守继承，并在评分卡标记来源；不能从更高 effort 反向赋给更低版本。Thinking 与非 Thinking 保持不同 key。刷新必须先完整抓取、解析、验证并生成两层；成功才以单一原子 replace 提交 bundle，任何网络、schema、大小或写入失败都不替换 last-known-good。
+当前来源是 Cursor 官方 CursorBench 与官方模型对比页。多维数据可被同 family 的更高 effort 版本保守继承，并在评分卡标记来源；不能从更高 effort 反向赋给更低版本。Thinking 与非 Thinking 保持不同 key。CursorBench 若没有 Thinking 行，路由在查找时借用同档非 Thinking 的 CursorBench 分：`high` 及以下加固定政策增量 `+0.5`，且不得超过下一档已公布分减 `0.1`；`extra high` / `max` 不加增量（这些档位本身不能关闭 Thinking）。官方一旦公布 Thinking 行，精确 key 优先生效并停止派生。刷新必须先完整抓取、解析、验证并生成两层；成功才以单一原子 replace 提交 bundle，任何网络、schema、大小或写入失败都不替换 last-known-good。
 
 评分默认 24 小时有效。读取永不等待网络：新鲜时直接返回；过期时立即返回 stale 并在后台单次刷新；冷启动返回 `warming` 并异步预热。跨进程锁和 2 分钟启动节流防止多会话重复刷新。需要安装后预热或诊断时才显式等待：
 
@@ -77,9 +84,11 @@ Auto 是底层型号不可观测的自适应路由器，不是一个可评分的
 - `reasoning_depth=standard` 的 `strong_reviewer`（High）；
 - `reasoning_depth=deep` 的 `critical_reviewer`（XHigh）；
 - `reasoning_depth=maximum` 的 `max_reviewer`（Max）；
-- router 返回的合格 Cursor 模型，通过 adapter 的显式只读 `review` 子命令。
+- router 返回的合格 Cursor 模型：Cursor 宿主用指定 `model_id` 的 Task / 子 Agent（`executor=cursor_session`）；Codex 宿主仅在 adapter 可用时走 adapter（`executor=cursor_agent`）的显式只读 `review` 子命令。
 
-当前宿主没有向脚本提供主会话的可验证模型/能力收据，router 不把 `current_session` 合成为 strong。weak/medium 的 controller 直接检查仍是工作流内检查，不冒充独立候选；strong Review 必须使用有收据的不同 Agent。
+`cursor_session` 不是当前父会话窗口。父会话没有可验证模型收据，不能冒充 strong。上层必须用候选的 `model_id` 开不同 Agent（Task）；Reviewer 尤其不得留在 writer 的同一聊天窗口。`receipt_key` 只用于对齐目标模型，不证明当前窗口已经是该模型。weak/medium 的 controller 直接检查仍是工作流内检查，不冒充独立候选。
+
+Cursor 宿主若选中 `codex_agent`，由上层调用本机 `codex` CLI 执行已安装 `.codex/agents/` 角色；本 pack 不提供 Cursor→Codex 调用器或工作区门禁。不能安全调用则不得发明流程，应回退下一条合格候选或停手并写明原因。
 
 Cursor adapter 不再在一次 writer 调用里强制嵌套原生 Reviewer；`candidate_ready` 只证明模型、同步终态与工作区边界合格，并带 `upper_review_required: true`。显式 Cursor Review 使用 plan/read-only 模式、前后工作区审计和 `AGENT_MODEL_REVIEW` 终态；任何 delta、Git 漂移、tier 不足、BLOCKED/UNAVAILABLE 都不能闭环。
 

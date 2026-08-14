@@ -276,10 +276,113 @@ def _name_parts(value: str) -> tuple[str, int]:
     return normalise_model_name(family), effort
 
 
+# CursorBench 目前没有 Thinking 行。查找时借用同档非 Thinking 分：
+# high 及以下 +0.5，且不得低于该档已公布分、不得超过下一档已公布分 − 0.1。
+# extra high / max +0（这些档不能关 Thinking）。官方一旦公布 Thinking 行，精确 key 优先，本派生停用。
+THINKING_POLICY_DELTA = 0.5
+THINKING_DELTA_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high"})
+THINKING_CAP_GAP = 0.1
+
+
 def _weighted(dimensions: dict[str, float], weights: dict[str, float]) -> float | None:
     if not all(key in dimensions for key in weights):
         return None
     return round(sum(dimensions[key] * weight for key, weight in weights.items()), 2)
+
+
+def _task_scores(dimensions: dict[str, float]) -> dict[str, float | None]:
+    return {
+        "exploration": dimensions["cursorbench"],
+        "micro_edit": dimensions["cursorbench"],
+        "bounded_implementation": dimensions["cursorbench"],
+        "prototype": _weighted(dimensions, {"cursorbench": 0.7, "apex_agents": 0.3}),
+        "complex_implementation": _weighted(
+            dimensions, {"cursorbench": 0.5, "deep_swe": 0.3, "frontier_code": 0.2}
+        ),
+        "root_cause": _weighted(
+            dimensions, {"cursorbench": 0.35, "deep_swe": 0.35, "terminal_bench": 0.3}
+        ),
+        "high_risk_review": _weighted(
+            dimensions, {"cursorbench": 0.4, "deep_swe": 0.35, "frontier_code": 0.25}
+        ),
+    }
+
+
+def non_thinking_canonical_key(canonical_key: str) -> str | None:
+    if type(canonical_key) is not str or "thinking" not in canonical_key:
+        return None
+    stripped = canonical_key.replace("thinking", "", 1)
+    return stripped or None
+
+
+def _next_effort_cap(base: dict[str, Any], models: list[dict[str, Any]]) -> float | None:
+    family, effort = _name_parts(base["display_name"])
+    higher = [
+        float(model["overall_score"])
+        for model in models
+        if type(model) is dict
+        and type(model.get("display_name")) is str
+        and type(model.get("overall_score")) in (int, float)
+        and _name_parts(model["display_name"])[0] == family
+        and _name_parts(model["display_name"])[1] > effort
+    ]
+    if not higher:
+        return None
+    return round(min(higher) - THINKING_CAP_GAP, 3)
+
+
+def lookup_scorecard_model(
+    canonical_key: str,
+    *,
+    effort: str | None,
+    scorecard: dict[str, Any],
+) -> dict[str, Any] | None:
+    if scorecard.get("status", "ok") != "ok":
+        return None
+    models = [
+        model for model in scorecard.get("models", [])
+        if type(model) is dict and type(model.get("canonical_key")) is str
+    ]
+    index = {model["canonical_key"]: model for model in models}
+    exact = index.get(canonical_key)
+    if exact is not None:
+        return {
+            **exact,
+            "score_resolution": "exact",
+        }
+    base_key = non_thinking_canonical_key(canonical_key)
+    if base_key is None:
+        return None
+    base = index.get(base_key)
+    if base is None or type(base.get("overall_score")) not in (int, float):
+        return None
+    normalized_effort = effort.casefold().strip() if type(effort) is str else ""
+    delta = THINKING_POLICY_DELTA if normalized_effort in THINKING_DELTA_EFFORTS else 0.0
+    base_score = float(base["overall_score"])
+    cursorbench = round(base_score + delta, 3)
+    cap = _next_effort_cap(base, models)
+    if cap is not None:
+        cursorbench = min(cursorbench, cap)
+    cursorbench = max(cursorbench, round(base_score, 3))
+    dimensions = dict(base.get("dimensions") or {})
+    dimensions["cursorbench"] = cursorbench
+    evidence = dict(base.get("evidence") or {})
+    evidence.update(
+        {
+            "thinking_inherited_from": base["canonical_key"],
+            "thinking_policy_delta": delta,
+        }
+    )
+    derived = {
+        **base,
+        "canonical_key": canonical_key,
+        "overall_score": cursorbench,
+        "task_scores": _task_scores(dimensions),
+        "dimensions": dimensions,
+        "evidence": evidence,
+        "score_resolution": "thinking_inherited",
+    }
+    return derived
 
 
 def _source_digest(source: dict[str, Any]) -> str:
@@ -310,26 +413,11 @@ def derive_scorecard(source: dict[str, Any]) -> dict[str, Any]:
                 evidence_name, _, _, inherited = max(compatible, key=lambda entry: entry[2])
                 dimensions = dict(inherited)
         dimensions["cursorbench"] = float(raw["cursorbench"])
-        tasks: dict[str, float | None] = {
-            "exploration": dimensions["cursorbench"],
-            "micro_edit": dimensions["cursorbench"],
-            "bounded_implementation": dimensions["cursorbench"],
-            "prototype": _weighted(dimensions, {"cursorbench": 0.7, "apex_agents": 0.3}),
-            "complex_implementation": _weighted(
-                dimensions, {"cursorbench": 0.5, "deep_swe": 0.3, "frontier_code": 0.2}
-            ),
-            "root_cause": _weighted(
-                dimensions, {"cursorbench": 0.35, "deep_swe": 0.35, "terminal_bench": 0.3}
-            ),
-            "high_risk_review": _weighted(
-                dimensions, {"cursorbench": 0.4, "deep_swe": 0.35, "frontier_code": 0.25}
-            ),
-        }
         model: dict[str, Any] = {
             "canonical_key": normalise_model_name(name),
             "display_name": name,
             "overall_score": dimensions["cursorbench"],
-            "task_scores": tasks,
+            "task_scores": _task_scores(dimensions),
             "dimensions": dimensions,
             "evidence": {
                 "cursorbench": source["sources"]["cursorbench"]["benchmark"],

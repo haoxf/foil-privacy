@@ -5,7 +5,7 @@ alwaysApply: false
 
 # Cursor Agent Adapter
 
-本 pack 只负责安全调用 Cursor CLI、model receipt 和工作区事实审计。writer / Reviewer 的能力下限、评分、额度池及 Review 责任由[统一模型路由](nr-agent-model-router-model-routing.mdc)在上层决定；Cursor 宿主禁止递归调用 adapter，直接使用自己的 root/subagent。
+本 pack 只负责安全调用 Cursor CLI、model receipt 和工作区事实审计。writer / Reviewer 的能力下限、评分、额度池及 Review 责任由[统一模型路由](nr-agent-model-router-model-routing.mdc)在上层决定；Cursor 宿主禁止递归调用 adapter，scored 候选用指定模型的 Task / 子 Agent，不得把父会话冒充为收据。
 
 ## 何时派发 writer
 
