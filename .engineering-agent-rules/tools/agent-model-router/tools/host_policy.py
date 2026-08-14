@@ -11,6 +11,8 @@ from typing import Any, Callable
 HOSTS = ("cursor", "codex", "unknown")
 CURSOR_HOST_FLAGS = ("CURSOR_AGENT",)
 CODEX_HOST_FLAGS = ("CODEX_SANDBOX", "CODEX_CI")
+CODEX_EXECUTORS = {"codex_agent", "codex_adapter"}
+CURSOR_EXECUTORS = {"cursor_agent", "cursor_session"}
 
 
 def is_host(value: object) -> bool:
@@ -72,8 +74,23 @@ def resolve_host(
     }
 
 
+def _adapter_probe(
+    *, host: str, self_host: str, enabled: bool, cli_available: bool,
+) -> dict[str, Any]:
+    if host == self_host:
+        return {"available": False, "reason": "self_dispatch_forbidden"}
+    if host == "unknown":
+        return {"available": False, "reason": "host_unknown_adapter_forbidden"}
+    if enabled is not True:
+        return {"available": False, "reason": "adapter_disabled"}
+    if not cli_available:
+        return {"available": False, "reason": "cli_missing"}
+    return {"available": True, "reason": None}
+
+
 def probe_dispatch(
     *, host: str, cursor_adapter_enabled: bool,
+    codex_adapter_enabled: bool,
     which: Callable[[str], str | None] = shutil.which,
 ) -> dict[str, Any]:
     if not is_host(host):
@@ -86,31 +103,22 @@ def probe_dispatch(
     else:
         session_reason = "not_cursor_host"
 
-    adapter_available = False
-    if host == "cursor":
-        adapter_reason = "self_dispatch_forbidden"
-    elif host == "unknown":
-        adapter_reason = "host_unknown_adapter_forbidden"
-    elif cursor_adapter_enabled is not True:
-        adapter_reason = "adapter_disabled"
-    elif not agent_cli:
-        adapter_reason = "cli_missing"
-    else:
-        adapter_available = True
-        adapter_reason = None
-
     if host == "codex":
-        codex_available = True
-        codex_reason = None
-        codex_source = "current_host"
-    elif codex_cli:
-        codex_available = True
-        codex_reason = None
-        codex_source = "cli_available"
+        native_codex = {
+            "available": True, "reason": None, "source": "current_host",
+        }
+    elif host == "unknown" and codex_cli:
+        native_codex = {
+            "available": True, "reason": None, "source": "cli_available",
+        }
+    elif host == "unknown":
+        native_codex = {
+            "available": False, "reason": "cli_missing", "source": "unavailable",
+        }
     else:
-        codex_available = False
-        codex_reason = "cli_missing"
-        codex_source = "unavailable"
+        native_codex = {
+            "available": False, "reason": "not_codex_host", "source": "unavailable",
+        }
 
     return {
         "host": host,
@@ -118,15 +126,15 @@ def probe_dispatch(
             "available": session_available,
             "reason": session_reason,
         },
-        "cursor_adapter": {
-            "available": adapter_available,
-            "reason": adapter_reason,
-        },
-        "codex_agent": {
-            "available": codex_available,
-            "reason": codex_reason,
-            "source": codex_source,
-        },
+        "cursor_adapter": _adapter_probe(
+            host=host, self_host="cursor", enabled=cursor_adapter_enabled,
+            cli_available=agent_cli,
+        ),
+        "codex_agent": native_codex,
+        "codex_adapter": _adapter_probe(
+            host=host, self_host="codex", enabled=codex_adapter_enabled,
+            cli_available=codex_cli,
+        ),
     }
 
 
@@ -138,8 +146,16 @@ def cursor_executor(dispatch: dict[str, Any]) -> str | None:
     return None
 
 
+def codex_executor(dispatch: dict[str, Any]) -> str | None:
+    if dispatch.get("codex_agent", {}).get("available") is True:
+        return "codex_agent"
+    if dispatch.get("codex_adapter", {}).get("available") is True:
+        return "codex_adapter"
+    return None
+
+
 def include_codex(dispatch: dict[str, Any]) -> bool:
-    return dispatch.get("codex_agent", {}).get("available") is True
+    return codex_executor(dispatch) is not None
 
 
 def include_cursor(dispatch: dict[str, Any]) -> bool:
