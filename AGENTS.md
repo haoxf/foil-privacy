@@ -15,6 +15,7 @@
 - 共享编码纪律——先理解和前置真实探针，后做最小可验证改动 → `.cursor/rules/nr-coding-discipline.mdc`
 - 共享 Git 安全规则——保持用户上下文，只提交明确授权的任务改动 → `.cursor/rules/nr-git-workflow.mdc`
 - Host adapter 路由——跨宿主派发冻结叶子；禁止自调 → `.cursor/rules/nr-host-agent-adapter-execution-trigger.mdc`
+- 用户可见回复——先给结论；不叙述过程；细节按需展开 → `.cursor/rules/nr-user-facing-reply.mdc`
 
 按需：
 
