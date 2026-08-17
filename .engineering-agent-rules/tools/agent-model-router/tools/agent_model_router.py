@@ -58,6 +58,97 @@ SCORE_DIMENSIONS = {
     "harvey_lab",
 }
 MAX_MODELS_OUTPUT_BYTES = 512 * 1024
+TASK_INHERIT_SLUG = "inherit"
+_TASK_SLUG_PATTERN = re.compile(r"[a-zA-Z0-9_.-]+")
+
+
+def normalize_cursor_task_slugs(values: list[str] | None) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for raw in values or []:
+        slug = str(raw).strip()
+        if (
+            not slug
+            or slug.casefold() == TASK_INHERIT_SLUG
+            or _TASK_SLUG_PATTERN.fullmatch(slug) is None
+            or slug in seen
+        ):
+            continue
+        seen.add(slug)
+        ordered.append(slug)
+    return ordered
+
+
+def cursor_session_model_filter(
+    models: list[dict[str, str]],
+    *,
+    host: str,
+    cursor_task_slugs: list[str] | None,
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    if host != "cursor":
+        return models, {
+            "status": "not_applicable",
+            "slugs": [],
+            "reason": "not_cursor_host",
+        }
+    slugs = normalize_cursor_task_slugs(cursor_task_slugs)
+    if not slugs:
+        return [], {
+            "status": "missing",
+            "slugs": [],
+            "reason": "cursor_host_requires_task_slugs",
+        }
+    allowed = set(slugs)
+    return (
+        [model for model in models if model.get("model_id") in allowed],
+        {
+            "status": "applied",
+            "slugs": slugs,
+            "reason": None,
+        },
+    )
+
+
+def cursor_session_retries(
+    recommended: dict[str, Any] | None,
+    alternatives: list[dict[str, Any]],
+) -> dict[str, list[str]]:
+    """Task retries from a receipt: cursor_session only, never Codex adapter slugs."""
+    baseline = (
+        recommended.get("reasoning_depth")
+        if recommended and recommended.get("executor") == "cursor_session"
+        else None
+    )
+    same: list[str] = []
+    deeper: list[str] = []
+    seen: set[str] = set()
+
+    def add(item: dict[str, Any]) -> None:
+        nonlocal baseline
+        if item.get("executor") != "cursor_session":
+            return
+        model_id = item.get("model_id")
+        depth = item.get("reasoning_depth")
+        if type(model_id) is not str or not model_id or model_id in seen:
+            return
+        if type(depth) is not str:
+            return
+        if baseline is None:
+            baseline = depth
+        seen.add(model_id)
+        if depth == baseline:
+            same.append(model_id)
+        elif (
+            reasoning_depth_at_least(depth, baseline)
+            and reasoning_depth_excess(depth, baseline) > 0
+        ):
+            deeper.append(model_id)
+
+    if recommended is not None:
+        add(recommended)
+    for item in alternatives:
+        add(item)
+    return {"same_depth": same, "deeper": deeper}
 
 
 def parse_cursor_models(output: str) -> list[dict[str, str]]:
@@ -478,6 +569,7 @@ def recommend(
     dispatch: dict[str, Any] | None = None,
     which: Callable[[str], str | None] | None = None,
     minimum_scores: dict[str, float] | None = None,
+    cursor_task_slugs: list[str] | None = None,
 ) -> dict[str, Any]:
     if (
         task_class not in TASK_CLASSES
@@ -500,14 +592,22 @@ def recommend(
         raise ValueError("unknown score dimension")
     if any(type(value) not in (int, float) or not 0 <= value <= 10000 for value in minimums.values()):
         raise ValueError("score minimum must be a finite non-negative number")
+    session_models, task_slug_evidence = cursor_session_model_filter(
+        cursor_models, host=host, cursor_task_slugs=cursor_task_slugs,
+    )
     candidates: list[dict[str, Any]] = []
     if not (task_class == "root_cause" and purpose == "writer"):
         cursor_executor = host_policy.cursor_executor(resolved_dispatch)
         if task_class != "root_cause" and cursor_executor is not None:
+            live_models = (
+                session_models
+                if cursor_executor == "cursor_session"
+                else cursor_models
+            )
             candidates = [
                 _bind_cursor_executor(candidate, cursor_executor)
                 for candidate in _cursor_candidates(
-                    cursor_models, scorecard, task_class=task_class
+                    live_models, scorecard, task_class=task_class
                 )
             ]
         if host_policy.include_codex(resolved_dispatch):
@@ -582,6 +682,8 @@ def recommend(
         )
     )
     recommended = eligible[0] if eligible else None
+    alternatives = eligible[1:5]
+    session_retries = cursor_session_retries(recommended, alternatives)
     recommended_provider = (
         "codex"
         if recommended and recommended["executor"] in host_policy.CODEX_EXECUTORS
@@ -605,12 +707,14 @@ def recommend(
             "host": host,
         },
         "recommended": recommended,
-        "alternatives": eligible[1:5],
+        "alternatives": alternatives,
+        "cursor_session_retries": session_retries,
         "evidence": {
             "scorecard": scorecard.get("cache", {}),
             "cursor_quota": cursor_quota.get("cache", {}),
             "codex_quota": codex_quota.get("cache", {}),
             "live_cursor_model_count": len(cursor_models),
+            "cursor_task_slugs": task_slug_evidence,
         },
         "pools": sorted(pools.values(), key=lambda pool: pool["pool_id"]),
         "dispatch": resolved_dispatch,
@@ -637,6 +741,7 @@ def select(
     dispatch_policy_path: Path | None = None,
     host: str | None = None,
     which: Callable[..., str | None] | None = None,
+    cursor_task_slugs: list[str] | None = None,
 ) -> dict[str, Any]:
     policy = dispatch_policy.load_policy(dispatch_policy_path)
     effective_preference = (
@@ -676,6 +781,7 @@ def select(
         host=resolved_host["host"],
         dispatch=dispatch,
         minimum_scores=minimum_scores,
+        cursor_task_slugs=cursor_task_slugs,
     )
     result["dispatch_policy"] = policy
     result["host"] = resolved_host
@@ -748,6 +854,16 @@ def _parser() -> argparse.ArgumentParser:
         metavar="DIMENSION=MINIMUM",
         help="模型必须满足的评分维度下限；可重复",
     )
+    choose.add_argument(
+        "--cursor-task-slug",
+        action="append",
+        default=[],
+        metavar="SLUG",
+        help=(
+            "Cursor 宿主本会话 Task 工具允许的 model slug；可重复；"
+            "忽略 inherit；缺省则不推荐 cursor_session"
+        ),
+    )
     commands.add_parser("snapshot")
     report_limit = commands.add_parser("report-limit")
     report_limit.add_argument("--pool", required=True)
@@ -808,6 +924,7 @@ def main(argv: list[str] | None = None) -> int:
             preferred_provider=arguments.prefer_provider,
             host=arguments.host,
             minimum_scores=minimum_scores,
+            cursor_task_slugs=arguments.cursor_task_slug,
         )
         code = 0 if result["recommended"] is not None else 2
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))

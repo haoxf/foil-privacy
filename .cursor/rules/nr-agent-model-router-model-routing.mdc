@@ -20,6 +20,7 @@ router 的结构化候选是一次调度的唯一能力收据：adapter 与上�
 - 零个或多个 `--min-score DIMENSION=MINIMUM`：模型必须逐项达到的机器证据。支持 `overall_score`、`task_score`、`cursorbench`、`deep_swe`、`frontier_code`、`terminal_bench`、`apex_agents`、`aa_intelligence`、`gdpval_aa`、`apex_swe`、`aa_briefcase`、`harvey_lab`。
 - `--prefer-provider auto|codex|cursor`：当前任务显式 provider 软优先；用户在当前任务说“优先使用 Codex/Cursor”后，后续每次 `select` 都传对应值，直到用户更改或取消，并覆盖全局默认。省略参数时读取 `~/.config/engineering-agent-rules/dispatch-policy.json`；文件缺失默认 `auto` 且两个 adapter 启用，损坏则安全降级为 `auto` 且两个 adapter 禁用并在收据标记 `invalid`。缺键只在内存补全，不改写磁盘。偏好只在已通过任务适用面、writer/reviewer、required tier、reasoning depth、逐维评分与额度门禁，且处于最低充分推理深度、**当前宿主允许且对方运行时可用** 的候选之间改变排序，不能强行选用不合格、已耗尽、更深档或不可用的 provider；回退时收据必须包含 `preference.honored=false` 与机器生成原因。
 - `--host cursor|codex|unknown`：当前 Agent 宿主。省略时从环境检测：`CURSOR_AGENT` 为 Cursor，`CODEX_SANDBOX` / `CODEX_CI` 为 Codex；冲突或全无则 `unknown`。显式值覆盖检测。
+- `--cursor-task-slug SLUG`：仅 Cursor 宿主、且只约束 `cursor_session`。把**本会话** Task 工具说明里「ONLY use model slugs from this list」的每一项原样传入（可重复；去掉 `inherit`）。这不是 CLI `agent models`，也不是本机设置；脚本不维护影子表，调用方不得凭记忆或旧收据编造。缺名单或只剩 inherit 则不推荐 `cursor_session`（收据 `evidence.cursor_task_slugs.status=missing`）；此时立即再 select，不向用户提问、不派发。Codex 宿主忽略该参数（`cursor_agent` 仍走 CLI 总表）。
 - `purpose=writer|reviewer`；Reviewer 另传 `--writer-model`，脚本会降低同模型优先级，但独立性的硬条件仍是不同 Agent 身份和稳定候选。
 
 ```sh
@@ -27,6 +28,8 @@ python3 .engineering-agent-rules/tools/agent-model-router/tools/agent_model_rout
   select --repo . --task-class complex_implementation --required-tier strong \
   --reasoning-depth deep --purpose writer --prefer-provider codex
 ```
+
+Cursor 宿主在同一条 `select` 上为短名单中除 `inherit` 外的每个 slug 追加 `--cursor-task-slug`。
 
 本机菜单栏 App 和人工 CLI 只通过同 pack 的单一工具原子读写全局策略，不直接拼 JSON：
 
@@ -73,7 +76,7 @@ python3 .engineering-agent-rules/tools/agent-model-router/tools/model_score_cach
 
 执行端若报告真实 quota/rate-limit，只把 router 候选的 `pool_id` 交回 `agent_model_router.py report-limit --pool POOL_ID`；统一工具自行失效正确缓存，调用方不定位、删除或刷新文件。Cursor adapter 与 Codex adapter 都已内建这一步。
 
-Cursor 候选在每次 `select` 都重新取 CLI 账户模型总表，再只读 Cursor 本机设置中的 Agent 模型定义，以“`defaultOn` 或用户显式开启，再减显式关闭”得到当前实际开启 family；variant 先在完整 known family 中确定最长归属，再要求该 family 已开启，不能从已关闭的长 family 退化匹配已开启短 family。两份模型清单都不缓存，开关变化在下一次路由立即生效。未开启的模型即使高分也不得出现。设置不可读、schema 未知或具体 variant 无法映射时 fail-closed，不猜测开启状态；本机读取不访问网络，也不进入额度 TTL。
+Cursor 候选在每次 `select` 都重新取 CLI 账户模型总表，再只读 Cursor 本机设置中的 Agent 模型定义，以“`defaultOn` 或用户显式开启，再减显式关闭”得到当前实际开启 family；variant 先在完整 known family 中确定最长归属，再要求该 family 已开启，不能从已关闭的长 family 退化匹配已开启短 family。两份模型清单都不缓存，开关变化在下一次路由立即生效。未开启的模型即使高分也不得出现。设置不可读、schema 未知或具体 variant 无法映射时 fail-closed，不猜测开启状态；本机读取不访问网络，也不进入额度 TTL。Cursor 宿主的 `cursor_session` 再与调用方传入的本会话 Task 短名单求交；这份名单每次由 Agent 从 Task 工具说明抄入，脚本不缓存、不猜测。
 
 Auto 是底层型号不可观测的自适应路由器，不是一个可评分的 medium 模型。Cursor Router 会读取 query、上下文、复杂度和领域，所以冻结简报须如实写风险/跨度以帮助分类；但提示词不是强制型号协议，当前 CLI 也不公开底层型号或 Intelligence/Balance/Cost 选择。router 不给它填 benchmark 或 task score，也不允许它满足任何 `--min-score`；只按保守策略给予 `policy_ceiling: medium`，用于无数值门槛的窄探索、微改或普通有界实现。strong、根因、高风险 Review 或任一显式评分门槛必须使用有评分的显式模型。将来运行时可显式选择且证明 Auto Intelligence 时再单独建策略证据，不靠提示词猜 strong。
 
@@ -81,14 +84,18 @@ Auto 是底层型号不可观测的自适应路由器，不是一个可评分的
 
 ## cursor_session 派发
 
-Cursor 注入给 Task 的 `model` 白名单短于 CLI / 本路由的 `model_id`。这是宿主限制，不是模型未开启。路由与上层都不维护 Task slug 影子表。
+Cursor 注入给 Task 的 `model` 白名单短于 CLI / 本路由的 `model_id`。这是宿主限制，不是模型未开启。路由与上层都不维护 Task slug 影子表；Cursor 宿主必须在 `select` 时把本会话活名单交给脚本，对 `cursor_session` 求交后再推荐。
 
-路由选档不变：不得因偏好、额度或省事把 High 升到 Extra High / Max。仅当平台明确拒绝该 slug（`Invalid model selection`，或等价「无法解析为子 Agent 模型」）时，按下面顺序再开 Task。这仍是不同 Agent。档位只对照收据字段与当前会话模型说明，不另造映射表。
+短名单是派发可用性，不是偏好升档：不在名单里的 High 不得推荐；若同深度没有可派发候选，才在名单内选更深档。不得因偏好、额度或省事把**仍可派发**的 High 升到 Extra High / Max。不得把名单外的 slug 传给 Task（尤其名单没有的 `*-fast`：平台可能静默换成更浅的 Composer Fast）。
 
-1. 先把收据 `model_id` 原样传给 Task。
-2. 按同一 `reasoning_depth` 的 `alternatives` 原样再试。父窗口与收据同一 family 且同一档时，也可省略 `model`（inherit）。
-3. 同深度都派不出去之后，可以改用更好的，不能改用更差的：同一收据里 `reasoning_depth` 严格大于 `recommended` 的 `alternatives` 原样再试（不重新 `select`）；父窗口同一 family 且不浅于收据时也可 inherit（Extra High 可以顶 High；High 不能顶 Extra High）。
-4. 更好的路径也全部被拒 → 停手，列出被拒 slug。禁止把 writer 或 Reviewer 留在父会话窗口，也不得改用更浅档。
+仅当推荐 `executor` 为 `cursor_session` 时开 Task。重试只使用收据 `cursor_session_retries`（脚本已从推荐与备选中筛出 `cursor_session`）。`alternatives` 会混入 `codex_adapter`；不得把那些 `model_id` 传给 Task，改走 Codex adapter。
+
+仅当平台明确拒绝该 slug（`Invalid model selection`，或等价「无法解析为子 Agent 模型」），或子 Agent 实际型号与收据不符时，按下面顺序再开 Task。这仍是不同 Agent。档位只对照收据字段与当前会话模型说明，不另造映射表。
+
+1. 先把 `cursor_session_retries.same_depth` 第一项（推荐 `model_id`）传给 Task。
+2. 其余 `same_depth` 再试。父窗口与收据同一 family 且同一档时，也可省略 `model`（inherit）。
+3. 同深度都派不出去之后，可以改用更好的，不能改用更差的：按 `deeper` 再试（不重新 `select`）；父窗口同一 family 且不浅于收据时也可 inherit（Extra High 可以顶 High；High 不能顶 Extra High）。
+4. Task 路径穷尽后，若收据仍有 `codex_adapter` 备选，改走 Codex adapter，不开 Task。都没有 → 停手，列出被拒 slug。禁止把 writer 或 Reviewer 留在父会话窗口，也不得改用更浅档。
 
 ## 上层 Review
 
