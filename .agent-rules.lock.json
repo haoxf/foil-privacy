@@ -12,7 +12,7 @@
     ".codex/agents/strong-worker.toml": "3608b7cfeec9a38d3d49f868138903b080e1c6ef0e9895c6997f28a1e7b98219",
     ".engineering-agent-rules/templates/agent-session-kits/multi-agent-brief.md": "3f41453a9971c7a9632357ad18aeb22558dd3a3c842e24e99835f2ef0323e24f",
     ".engineering-agent-rules/templates/agent-session-kits/session-retro.md": "3f19c48231eafbdc7dd709b2774ed91472b901e55cdde3b7f466202c24872728",
-    ".engineering-agent-rules/tools/agent-model-router/tools/agent_model_router.py": "829ece61b819cc428a9348ac1a8e614b818edae3648792521a9d07171f06490b",
+    ".engineering-agent-rules/tools/agent-model-router/tools/agent_model_router.py": "36041fb340d40258fe8202aca4d90a94f69fbaa55935ea400500aef07ac5d60a",
     ".engineering-agent-rules/tools/agent-model-router/tools/cache_store.py": "4637b6221a2d73653bb71d6b05561b0efb6d4bf697472b93ae82ad1d3f8b799a",
     ".engineering-agent-rules/tools/agent-model-router/tools/codex_usage.py": "d71c3049937adafec892c96a4e9707cd09067c19c3665869b90fb0fdc0036c7a",
     ".engineering-agent-rules/tools/agent-model-router/tools/cursor_model_selection.py": "9580ad7c26d821fe4c7e9068f015a39ec2bd6800e568c6312a097d9d7a9ed8e1",
@@ -39,7 +39,7 @@
   "files": {
     "nr-agent-delegation.mdc": "351071e441be6342ed4485ccd26892ab566620f87e7e8062e2303daf39eec4bd",
     "nr-agent-model-router-execution-trigger.mdc": "1df43143f0a7489ecdc8fa5b17e158637967130bcb5dc6eac52ead91181a958b",
-    "nr-agent-model-router-model-routing.mdc": "be9560aa6ab33a74312071cc17d574c853bd11df97a2e6745acc7acf36889f2c",
+    "nr-agent-model-router-model-routing.mdc": "71795b08175b391c67515a0da33e77870df2b9357693a0a56fe994795b98564a",
     "nr-agent-session-kits-multi-agent-brief.mdc": "94087f04f5880b5798d353d486b01ea8dad530cf69f557319643ddc22fc81bda",
     "nr-agent-session-kits-session-retro.mdc": "78ca3bba764675d072a470bae32bb21c98d0aea6e0f856cee7bbef5883cbc7f5",
     "nr-agent-task-runtime-execution-trigger.mdc": "57a06c48506c4c55a6538ebe06d1c30820d0d06fa8d61caf590c7906da0922b7",
@@ -56,7 +56,7 @@
     "nr-unattended-workflow.mdc": "cc803db45035f068c2e92059fa38041ea0d81cd0b1ac3178ddd6f7fb7868cd27",
     "nr-user-facing-reply.mdc": "664d59cf68c632469dbe90c9e2874f23cf6b85142cc2379c790a10ba9c0e5571"
   },
-  "installed_package_sha256": "cceb711172ec38c24981d591ac194cc589422c571ca693b23fa446b2c57ec729",
+  "installed_package_sha256": "2e21147aa4534ab3686c09af9ad9e092bd3a40e7e968161ad6b298b23097081f",
   "packs": [
     "agent-model-router",
     "agent-session-kits",
@@ -70,9 +70,9 @@
   ],
   "rule_filename_prefix": "nr-",
   "schema_version": 4,
-  "source_commit": "450f46f7167ba5a81cb0af194f4969920151c735",
+  "source_commit": "bc6f7d475fde53fa4664cef06e2b5b34b35532ac",
   "source_dirty": false,
-  "source_package_sha256": "cceb711172ec38c24981d591ac194cc589422c571ca693b23fa446b2c57ec729",
+  "source_package_sha256": "2e21147aa4534ab3686c09af9ad9e092bd3a40e7e968161ad6b298b23097081f",
   "source_path": "/Users/dingping/XCodeProjects/engineering-agent-rules",
   "source_url": "https://github.com/haoxf/engineering-agent-rules.git",
   "template_overrides": {}

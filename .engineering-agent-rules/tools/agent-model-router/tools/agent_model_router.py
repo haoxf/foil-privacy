@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import importlib.util
 import json
 from pathlib import Path
@@ -32,6 +33,8 @@ from tier_policy import TIER_LEVELS, TIER_NAMES, tier_at_least
 
 SCHEMA_VERSION = 1
 TIER_SCORE = {"weak": 0.0, "medium": 60.0, "strong": 67.0}
+PACE_GAP = 10.0
+PACE_CLASS_ORDER = {"behind": 0, "on_pace": 1, "unknown": 1, "ahead": 2}
 TASK_CLASSES = {
     "exploration",
     "micro_edit",
@@ -266,32 +269,113 @@ def discover_codex_roles(repo: Path) -> list[dict[str, Any]]:
     return roles
 
 
-def _pool_facts(cursor: dict[str, Any], codex: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _parse_utc(value: Any) -> datetime | None:
+    if type(value) is not str or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _linear_elapsed_percent(
+    start: datetime, end: datetime, now: datetime,
+) -> float | None:
+    total = (end - start).total_seconds()
+    if total <= 0:
+        return None
+    elapsed = min(max((now - start).total_seconds(), 0.0), total)
+    return elapsed / total * 100
+
+
+def _pace_annotation(used: Any, elapsed: float | None) -> dict[str, Any]:
+    if elapsed is None or isinstance(used, bool) or type(used) not in (int, float):
+        return {"pace_class": "unknown"}
+    delta = float(used) - elapsed
+    if delta <= -PACE_GAP:
+        pace_class = "behind"
+    elif delta >= PACE_GAP:
+        pace_class = "ahead"
+    else:
+        pace_class = "on_pace"
+    return {
+        "elapsed_percent": round(elapsed, 3),
+        "pace_delta": round(delta, 3),
+        "pace_class": pace_class,
+    }
+
+
+def _cursor_cycle_elapsed(
+    cursor: dict[str, Any], now: datetime,
+) -> tuple[float | None, str | None]:
+    cycle = cursor.get("cycle")
+    if type(cycle) is not dict:
+        return None, None
+    start = _parse_utc(cycle.get("start"))
+    end = _parse_utc(cycle.get("end"))
+    if start is None or end is None:
+        return None, None
+    reset_at = cycle.get("end") if type(cycle.get("end")) is str else None
+    return _linear_elapsed_percent(start, end, now), reset_at
+
+
+def _codex_window_elapsed(
+    window: dict[str, Any], now: datetime,
+) -> tuple[float | None, str | None]:
+    reset_at = window.get("reset_at") if type(window.get("reset_at")) is str else None
+    reset = _parse_utc(reset_at)
+    minutes = window.get("window_minutes")
+    if reset is None or type(minutes) is not int or minutes <= 0:
+        return None, reset_at
+    start = reset - timedelta(minutes=minutes)
+    return _linear_elapsed_percent(start, reset, now), reset_at
+
+
+def _pool_facts(
+    cursor: dict[str, Any], codex: dict[str, Any], *, now: datetime,
+) -> dict[str, dict[str, Any]]:
     facts: dict[str, dict[str, Any]] = {}
     cursor_fresh = cursor.get("cache", {}).get("fresh") is True
+    cursor_elapsed, cursor_reset = _cursor_cycle_elapsed(cursor, now)
     if cursor.get("status") == "ok":
         for key, pool_id in (("auto", "cursor_first_party"), ("api", "cursor_api")):
             raw = cursor.get(key)
             if type(raw) is not dict:
                 continue
-            facts[pool_id] = {
+            used = raw.get("used_percent")
+            fact = {
                 "pool_id": pool_id,
                 "fresh": cursor_fresh,
                 "exhausted": raw.get("exhausted") is True if cursor_fresh else False,
-                "used_percent": raw.get("used_percent"),
+                "used_percent": used,
+                **_pace_annotation(used, cursor_elapsed),
             }
+            if cursor_reset:
+                fact["reset_at"] = cursor_reset
+            facts[pool_id] = fact
     codex_fresh = codex.get("cache", {}).get("fresh") is True
     if codex.get("status") == "ok":
         for raw in codex.get("pools", []):
             if type(raw) is not dict or type(raw.get("pool_id")) is not str:
                 continue
             window = raw.get("window", {})
-            facts[raw["pool_id"]] = {
+            if type(window) is not dict:
+                window = {}
+            used = window.get("used_percent")
+            elapsed, reset_at = _codex_window_elapsed(window, now)
+            fact = {
                 "pool_id": raw["pool_id"],
                 "fresh": codex_fresh,
                 "exhausted": raw.get("exhausted") is True if codex_fresh else False,
-                "used_percent": window.get("used_percent"),
+                "used_percent": used,
+                **_pace_annotation(used, elapsed),
             }
+            if reset_at:
+                fact["reset_at"] = reset_at
+            facts[raw["pool_id"]] = fact
     return facts
 
 
@@ -570,6 +654,7 @@ def recommend(
     which: Callable[[str], str | None] | None = None,
     minimum_scores: dict[str, float] | None = None,
     cursor_task_slugs: list[str] | None = None,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     if (
         task_class not in TASK_CLASSES
@@ -586,7 +671,12 @@ def recommend(
         codex_adapter_enabled=codex_adapter_enabled,
         which=which or shutil.which,
     )
-    pools = _pool_facts(cursor_quota, codex_quota)
+    resolved_now = datetime.now(timezone.utc) if now is None else now
+    if resolved_now.tzinfo is None:
+        resolved_now = resolved_now.replace(tzinfo=timezone.utc)
+    else:
+        resolved_now = resolved_now.astimezone(timezone.utc)
+    pools = _pool_facts(cursor_quota, codex_quota, now=resolved_now)
     minimums = minimum_scores or {}
     if set(minimums) - SCORE_DIMENSIONS:
         raise ValueError("unknown score dimension")
@@ -645,8 +735,16 @@ def recommend(
             continue
         rank = _base_rank(candidate, task_class=task_class, purpose=purpose)
         used = pool.get("used_percent") if pool is not None else None
-        if type(used) in (int, float):
+        pace_delta = pool.get("pace_delta") if pool is not None else None
+        if type(pace_delta) in (int, float) and not isinstance(pace_delta, bool):
+            rank += float(pace_delta) / 20.0
+        elif type(used) in (int, float) and not isinstance(used, bool):
             rank += float(used) / 20.0
+        pace_class = (
+            pool.get("pace_class") if pool is not None else None
+        )
+        if pace_class not in PACE_CLASS_ORDER:
+            pace_class = "unknown"
         if type(score) in (int, float):
             rank -= float(score) / 20.0
         cost = candidate.get("average_cost_usd")
@@ -663,6 +761,7 @@ def recommend(
             {
                 **candidate,
                 "provider": candidate_provider,
+                "pace_class": pace_class,
                 "reasoning_depth_excess": reasoning_depth_excess(
                     candidate["reasoning_depth"], reasoning_depth
                 ),
@@ -676,6 +775,7 @@ def recommend(
             if preferred_provider == "auto"
             or item["provider"] == preferred_provider
             else 1,
+            PACE_CLASS_ORDER[item["pace_class"]],
             item["rank"],
             -(item.get("task_score") or -1),
             item.get("model_id", ""),
