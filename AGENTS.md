@@ -20,7 +20,7 @@
 按需：
 
 - 共享多 Agent 委派——简报预算、并行、审查/根因执行细则与降级 → `.cursor/rules/nr-agent-delegation.mdc`
-- 模型路由协议——两层评分缓存、异步额度快照、显式能力门槛与上层 Review 闭环 → `.cursor/rules/nr-agent-model-router-model-routing.mdc`
+- 模型路由协议——两层评分缓存、异步额度快照、显式能力门槛、cursor_session 派发与上层 Review 闭环 → `.cursor/rules/nr-agent-model-router-model-routing.mdc`
 - 多 Agent 简报——委派前按已安装 multi-agent-brief 模板填有界字段；有模板不强制开子 Agent → `.cursor/rules/nr-agent-session-kits-multi-agent-brief.mdc`
 - 可选会话复盘——用户要求、卡住刹车上报或明显拉扯/高成本时按已安装 session-retro 模板写短表 → `.cursor/rules/nr-agent-session-kits-session-retro.mdc`
 - 可选任务运行时——对齐复杂任务、逐票验证并保持长会话方向稳定 → `.cursor/rules/nr-agent-task-runtime-task-runtime.mdc`

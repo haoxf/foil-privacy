@@ -1,5 +1,5 @@
 ---
-description: 模型路由协议——两层评分缓存、异步额度快照、显式能力门槛与上层 Review 闭环
+description: 模型路由协议——两层评分缓存、异步额度快照、显式能力门槛、cursor_session 派发与上层 Review 闭环
 alwaysApply: false
 ---
 
@@ -7,7 +7,7 @@ alwaysApply: false
 
 本 pack 把“需要什么能力”和“当前让谁执行”分开。主 Agent 持有范围、风险、产品/架构判断和验收，脚本只对冻结要求、机器评分与额度事实求交集，不从模型名字猜能力，也不改变任务风险。
 
-router 的结构化候选是一次调度的唯一能力收据：adapter 与上层只原样消费候选中的模型、来源、tier、额度池和评分证据，不再各自维护模型名→能力、模型名→额度池或启用状态的影子表。`tier_policy.py` 是三档顺序/比较的唯一实现，adapter 与 task runtime 也直接调用它；schema enum 只是受测试约束的边界快照。缓存刷新、失效和候选求交全部封装在工具内；Agent 不直接读写缓存，也不手工重算结果。
+router 的结构化候选是一次调度的唯一能力收据：adapter 与上层只原样消费候选中的模型、来源、tier、额度池和评分证据，不再各自维护模型名→能力、模型名→额度池、启用状态或 Task slug 白名单的影子表。`tier_policy.py` 是三档顺序/比较的唯一实现，adapter 与 task runtime 也直接调用它；schema enum 只是受测试约束的边界快照。缓存刷新、失效和候选求交全部封装在工具内；Agent 不直接读写缓存，也不手工重算结果。
 
 ## 调用契约
 
@@ -40,7 +40,7 @@ python3 .engineering-agent-rules/tools/agent-model-router/tools/dispatch_policy.
 
 路由先识别宿主，再探测对方是否可调用，禁止再拉起**同一个**运行时：
 
-- Cursor 宿主产出 `cursor_session`：指定 `model_id` 的 Task / 子 Agent，**禁止** Cursor adapter（自己调自己）。这不是父会话窗口。Codex 仅当全局 `codex_adapter_enabled=true` 且 `codex` CLI 可用时以 `executor=codex_adapter` 进入候选；上层走已安装 Codex adapter，不得自己发明 `codex exec`。
+- Cursor 宿主产出 `cursor_session`：指定 `model_id` 的 Task / 子 Agent，**禁止** Cursor adapter（自己调自己）。这不是父会话窗口；派发见 `cursor_session` 派发。Codex 仅当全局 `codex_adapter_enabled=true` 且 `codex` CLI 可用时以 `executor=codex_adapter` 进入候选；上层走已安装 Codex adapter，不得自己发明 `codex exec`。
 - Codex 宿主产出 `codex_agent` 角色（本宿主）。Cursor adapter 仅当全局 `cursor_adapter_enabled=true` 且 `agent` CLI 可用时进入候选。
 - `unknown` 宿主禁止两个 adapter 和 Cursor 会话候选，避免误递归；Codex 仍仅在 CLI 可用时以本机 `codex_agent` 出现。
 
@@ -79,6 +79,17 @@ Auto 是底层型号不可观测的自适应路由器，不是一个可评分的
 
 脚本随后排除未满足 tier、reasoning depth、任一最低评分、当前未开启模型或新鲜耗尽池的候选；先最小化超过要求的 reasoning depth，再在同一最低充分深度内综合用户 provider 偏好、任务适用面、池使用比例、评分、平均任务成本与 fast 偏好排序。这样 provider 偏好优先于默认成本/额度权重，但永不以更深推理档“满足”偏好；没有同深度合格偏好候选时回退并给出机器原因。冻结窄探索/微改在无数值门槛时优先独立 Spark 池；`codex_main` 在主池紧张时自然后移，但 required tier 和 reasoning depth 永不降级。固定 Codex 角色的 tier 来自受限角色契约；同型号/推理档位若能唯一对应第二层评分卡，可额外满足调用方显式指定的逐维最低值，但公开总分不反向改写该角色 tier。型号或档位无法唯一映射时仍按未评分角色处理。返回 `recommended`、最多四个 `alternatives`、`preference` 收据、深度证据、启用模型证据、评分/额度新鲜度和最小 pool facts；上层不读写缓存文件。
 
+## cursor_session 派发
+
+Cursor 注入给 Task 的 `model` 白名单短于 CLI / 本路由的 `model_id`。这是宿主限制，不是模型未开启。路由与上层都不维护 Task slug 影子表。
+
+路由选档不变：不得因偏好、额度或省事把 High 升到 Extra High / Max。仅当平台明确拒绝该 slug（`Invalid model selection`，或等价「无法解析为子 Agent 模型」）时，按下面顺序再开 Task。这仍是不同 Agent。档位只对照收据字段与当前会话模型说明，不另造映射表。
+
+1. 先把收据 `model_id` 原样传给 Task。
+2. 按同一 `reasoning_depth` 的 `alternatives` 原样再试。父窗口与收据同一 family 且同一档时，也可省略 `model`（inherit）。
+3. 同深度都派不出去之后，可以改用更好的，不能改用更差的：同一收据里 `reasoning_depth` 严格大于 `recommended` 的 `alternatives` 原样再试（不重新 `select`）；父窗口同一 family 且不浅于收据时也可 inherit（Extra High 可以顶 High；High 不能顶 Extra High）。
+4. 更好的路径也全部被拒 → 停手，列出被拒 slug。禁止把 writer 或 Reviewer 留在父会话窗口，也不得改用更浅档。
+
 ## 上层 Review
 
 所有 writer 的非空 delta 都只是待审候选。上层在同一稳定 fingerprint 上再次调用 router（`purpose=reviewer`，门槛不得低于 writer/风险），同一 Agent 身份被硬排除而非只降权，然后选择：
@@ -86,10 +97,10 @@ Auto 是底层型号不可观测的自适应路由器，不是一个可评分的
 - `reasoning_depth=standard` 的 `strong_reviewer`（High）；
 - `reasoning_depth=deep` 的 `critical_reviewer`（XHigh）；
 - `reasoning_depth=maximum` 的 `max_reviewer`（Max）；
-- router 返回的合格 Cursor 模型：Cursor 宿主用指定 `model_id` 的 Task / 子 Agent（`executor=cursor_session`）；Codex 宿主仅在 adapter 可用时走 adapter（`executor=cursor_agent`）的显式只读 `review` 子命令。
+- router 返回的合格 Cursor 模型：Cursor 宿主按上一节派发指定 `model_id` 的 Task / 子 Agent（`executor=cursor_session`）；Codex 宿主仅在 adapter 可用时走 adapter（`executor=cursor_agent`）的显式只读 `review` 子命令。
 - router 返回的合格 Codex 角色：Codex 宿主用本宿主角色（`executor=codex_agent`）；Cursor 宿主仅在 Codex adapter 可用时走 adapter（`executor=codex_adapter`）。Codex 收据键规范化为 `(model_id, reasoning_effort)`。
 
-`cursor_session` 不是当前父会话窗口。父会话没有可验证模型收据，不能冒充 strong。上层必须用候选的 `model_id` 开不同 Agent（Task）；Reviewer 尤其不得留在 writer 的同一聊天窗口。`receipt_key` 只用于对齐目标模型，不证明当前窗口已经是该模型。weak/medium 的 controller 直接检查仍是工作流内检查，不冒充独立候选。
+`cursor_session` 不是当前父会话窗口。父会话没有可验证模型收据，不能冒充 strong。上层按上一节开不同 Agent（Task）；Reviewer 尤其不得留在 writer 的同一聊天窗口。`receipt_key` 只用于对齐目标模型，不证明当前窗口已经是该模型。weak/medium 的 controller 直接检查仍是工作流内检查，不冒充独立候选。
 
 Cursor adapter 不再在一次 writer 调用里强制嵌套原生 Reviewer；`candidate_ready` 只证明模型、同步终态合格，并带 `upper_review_required: true`。显式 Cursor Review 使用 plan/read-only 模式和 `AGENT_MODEL_REVIEW` 终态；tier 不足、BLOCKED/UNAVAILABLE 都不能闭环。Git 可见改动只作可选事实。
 
