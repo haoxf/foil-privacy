@@ -50,7 +50,7 @@ controller 按依赖推进唯一 active ticket：
 
 ## Git 与边界
 
-runtime 不创建 worktree、不创建/切换分支、不 commit/merge/push。`git_policy` 只冻结允许范围；执行端仍须遵守 core Git 与交付门禁：
+runtime 不创建 worktree、不创建/切换分支、不 commit/merge/push。`git_policy` 只冻结允许范围；执行端仍须遵守 core Git 与交付门禁。对齐时默认 `commit_policy: verified_ticket_commits`；仅当用户明确要求本任务不自动提交时用 `none`。人工验收票在「验收通过」前不得 `close-ticket`。
 
 - 当前分支已是本任务分支时优先 `reuse_current`；否则可在 arm 前选择 `create_task_branch`。创建任务分支时 integration mode 默认 `ff_only_back`，并冻结 `return_branch` 及其当时指向的 `context.base_head`；只有用户明确要求保留分支、走 PR 或不集成，才可选 `no_integration`。创建 worktree 始终单独向用户确认。
 - `verified_ticket_commits` 只允许在当前票已经 `close-ticket`、候选未漂移且能精确 stage owned changes 后做 checkpoint commit。
