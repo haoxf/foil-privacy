@@ -11,7 +11,7 @@
 
 - 统一模型路由——按能力、深度、评分与额度选择执行端 → `.cursor/rules/nr-agent-model-router-execution-trigger.mdc`
 - 任务运行时路由——强化持久多票对齐与续接 → `.cursor/rules/nr-agent-task-runtime-execution-trigger.mdc`
-- 共享 Agent 工作流——三路径、自主推进、授权与审查门槛 → `.cursor/rules/nr-agent-workflow.mdc`
+- 共享 Agent 工作流——三路径、单 writer、自主推进与审查门槛 → `.cursor/rules/nr-agent-workflow.mdc`
 - 共享编码纪律——先理解和前置真实探针，后做最小可验证改动 → `.cursor/rules/nr-coding-discipline.mdc`
 - 共享 Git 安全规则——保持用户上下文，过闸任务改动默认本地提交 → `.cursor/rules/nr-git-workflow.mdc`
 - Host adapter 路由——跨宿主派发冻结叶子；禁止自调 → `.cursor/rules/nr-host-agent-adapter-execution-trigger.mdc`

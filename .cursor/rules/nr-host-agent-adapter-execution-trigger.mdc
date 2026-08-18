@@ -5,6 +5,6 @@ alwaysApply: true
 
 # Host adapter
 
-禁止自己调自己。经[统一路由](nr-agent-model-router-model-routing.mdc)选中后：收据 `executor` 为 `cursor_agent` 时加载[Cursor 协议](nr-host-agent-adapter-cursor-agent-adapter.mdc)；为 `codex_adapter` 时加载[Codex 协议](nr-host-agent-adapter-codex-agent-adapter.mdc)。须策略允许、写域/oracle 可冻、无 writer、preflight 可用。`cursor_session` 开 Task；slug 被拒或实际换模时只重试收据 slug：先同深度再可升不可降，Codex 备选走 adapter，禁止留在父窗口。R0 不拆票。
+禁止自己调自己。经[统一路由](nr-agent-model-router-model-routing.mdc)选中后：收据 `executor` 为 `cursor_agent` 时加载[Cursor 协议](nr-host-agent-adapter-cursor-agent-adapter.mdc)；为 `codex_adapter` 时加载[Codex 协议](nr-host-agent-adapter-codex-agent-adapter.mdc)。须策略允许、写域/oracle 可冻、无其他 writer、preflight 可用。`cursor_session` 开 Task；slug 被拒或实际换模时只重试收据 slug：先同深度再可升不可降，Codex 备选走 adapter，禁止留在父窗口。R0 不拆票。
 
-`candidate_ready` 只是待审候选，上层须完成独立 Review；判断未冻结或工具不可用时旁路。
+`candidate_ready` 只是待审候选，上层须完成独立 Review；旁路仅 R0/角色 gate，否则改派。

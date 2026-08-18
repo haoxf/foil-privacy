@@ -1,7 +1,7 @@
 # Multi-Agent Brief
 
 委派子 Agent 前填写。指针优先：给路径、commit、行号与验收指针；不要粘贴完整会话、完整大 diff、大日志或整个结果包。  
-**有本模板不等于必须启动子 Agent**；是否委派按 `.cursor/rules/nr-agent-workflow.mdc`，简报与执行细则按 `.cursor/rules/nr-agent-delegation.mdc`。
+**有本模板不等于必须额外启动子 Agent**；是否委派按 `.cursor/rules/nr-agent-workflow.mdc`（要求派发时必须派发），简报与执行细则按 `.cursor/rules/nr-agent-delegation.mdc`。
 
 安装路径：`.engineering-agent-rules/templates/agent-session-kits/multi-agent-brief.md`。项目私有注记可另写 overlay，不要改本托管文件。
 

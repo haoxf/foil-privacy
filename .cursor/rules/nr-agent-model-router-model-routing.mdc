@@ -88,7 +88,7 @@ Cursor 注入给 Task 的 `model` 白名单短于 CLI / 本路由的 `model_id`�
 
 短名单是派发可用性，不是偏好升档：不在名单里的 High 不得推荐；若同深度没有可派发候选，才在名单内选更深档。不得因偏好、额度或省事把**仍可派发**的 High 升到 Extra High / Max。不得把名单外的 slug 传给 Task（尤其名单没有的 `*-fast`：平台可能静默换成更浅的 Composer Fast）。
 
-仅当推荐 `executor` 为 `cursor_session` 时开 Task。重试只使用收据 `cursor_session_retries`（脚本已从推荐与备选中筛出 `cursor_session`）。`alternatives` 会混入 `codex_adapter`；不得把那些 `model_id` 传给 Task，改走 Codex adapter。
+仅当推荐 `executor` 为 `cursor_session` 时开 Task。已派 writer 期间，父窗口禁止对该票 `write_paths` 做生产写入。重试只使用收据 `cursor_session_retries`（脚本已从推荐与备选中筛出 `cursor_session`）。`alternatives` 会混入 `codex_adapter`；不得把那些 `model_id` 传给 Task，改走 Codex adapter。
 
 仅当平台明确拒绝该 slug（`Invalid model selection`，或等价「无法解析为子 Agent 模型」），或子 Agent 实际型号与收据不符时，按下面顺序再开 Task。这仍是不同 Agent。档位只对照收据字段与当前会话模型说明，不另造映射表。
 
