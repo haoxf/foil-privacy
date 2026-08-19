@@ -27,12 +27,12 @@ import quota_cache
 from reasoning_policy import (
     REASONING_DEPTH_LEVELS, REASONING_DEPTH_NAMES,
     reasoning_depth_at_least, reasoning_depth_excess, reasoning_depth_for_effort,
+    reasoning_depth_for_codex_role_effort,
 )
-from tier_policy import TIER_LEVELS, TIER_NAMES, tier_at_least
+from tier_policy import TIER_LEVELS, TIER_NAMES, is_tier, tier_at_least
 
 
 SCHEMA_VERSION = 1
-TIER_SCORE = {"weak": 0.0, "medium": 60.0, "strong": 67.0}
 PACE_GAP = 10.0
 PACE_CLASS_ORDER = {"behind": 0, "on_pace": 1, "unknown": 1, "ahead": 2}
 TASK_CLASSES = {
@@ -389,16 +389,6 @@ def _score_index(scorecard: dict[str, Any]) -> dict[str, dict[str, Any]]:
     }
 
 
-def _tier_from_score(score: float | None) -> str:
-    if score is None:
-        return "weak"
-    if score >= TIER_SCORE["strong"]:
-        return "strong"
-    if score >= TIER_SCORE["medium"]:
-        return "medium"
-    return "weak"
-
-
 def _cursor_candidates(
     models: list[dict[str, str]], scorecard: dict[str, Any],
     *, task_class: str,
@@ -440,6 +430,13 @@ def _cursor_candidates(
         )
         if scored is None:
             continue
+        capability_tier = scored.get("capability_tier")
+        family_capability_score = scored.get("family_capability_score")
+        if (
+            not is_tier(capability_tier)
+            or type(family_capability_score) not in (int, float)
+        ):
+            continue
         task_score = scored.get("task_scores", {}).get(task_class)
         if type(task_score) not in (int, float):
             continue
@@ -456,7 +453,8 @@ def _cursor_candidates(
                 "model_source": live["model_source"],
                 "receipt_key": live["receipt_key"],
                 "pool_id": pool_id,
-                "tier": _tier_from_score(float(scored["overall_score"])),
+                "tier": capability_tier,
+                "family_capability_score": float(family_capability_score),
                 "reasoning_depth": reasoning_depth,
                 "reasoning_depth_evidence": "explicit_runtime_effort",
                 "capability_mode": "benchmarked_explicit_model",
@@ -526,7 +524,7 @@ def _codex_candidates(
             continue
         spark = name in {"explorer", "spark_worker"}
         tier = "medium" if spark or name == "bounded_worker" else "strong"
-        reasoning_depth = reasoning_depth_for_effort(role["reasoning_effort"])
+        reasoning_depth = reasoning_depth_for_codex_role_effort(role["reasoning_effort"])
         if reasoning_depth is None:
             continue
         try:
@@ -727,12 +725,6 @@ def recommend(
         ):
             continue
         score = candidate.get("task_score")
-        overall_score = candidate.get("overall_score")
-        if candidate.get("capability_mode") == "benchmarked_explicit_model" and (
-            type(overall_score) not in (int, float)
-            or overall_score < TIER_SCORE[required_tier]
-        ):
-            continue
         rank = _base_rank(candidate, task_class=task_class, purpose=purpose)
         used = pool.get("used_percent") if pool is not None else None
         pace_delta = pool.get("pace_delta") if pool is not None else None

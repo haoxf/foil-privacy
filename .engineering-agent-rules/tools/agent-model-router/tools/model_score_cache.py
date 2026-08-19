@@ -263,7 +263,7 @@ _EFFORTS = {
 
 
 def _name_parts(value: str) -> tuple[str, int]:
-    cleaned = re.sub(r"\b(?:cursor|fast|no\s*zdr|1m)\b", " ", value, flags=re.I)
+    cleaned = re.sub(r"\b(?:cursor|fast|no\s*zdr|1m|thinking)\b", " ", value, flags=re.I)
     cleaned = re.sub(r"\bxhigh\b", "extra high", cleaned, flags=re.I)
     effort = 2
     family = cleaned
@@ -282,6 +282,58 @@ def _name_parts(value: str) -> tuple[str, int]:
 THINKING_POLICY_DELTA = 0.5
 THINKING_DELTA_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high"})
 THINKING_CAP_GAP = 0.1
+
+TIER_SCORE = {"weak": 0.0, "medium": 60.0, "strong": 67.0}
+
+
+def capability_tier_from_score(score: object) -> str:
+    if type(score) not in (int, float):
+        return "weak"
+    value = float(score)
+    if value >= TIER_SCORE["strong"]:
+        return "strong"
+    if value >= TIER_SCORE["medium"]:
+        return "medium"
+    return "weak"
+
+
+def _published_family_capability_index(
+    models: list[dict[str, Any]],
+) -> dict[str, float]:
+    index: dict[str, float] = {}
+    for model in models:
+        if type(model) is not dict:
+            continue
+        name = model.get("display_name")
+        score = model.get("overall_score")
+        if type(name) is not str or type(score) not in (int, float):
+            continue
+        family, _effort = _name_parts(name)
+        if not family:
+            continue
+        value = float(score)
+        current = index.get(family)
+        if current is None or value > current:
+            index[family] = value
+    return index
+
+
+def _attach_family_capability(
+    model: dict[str, Any], family_index: dict[str, float],
+) -> dict[str, Any]:
+    name = model.get("display_name")
+    own = model.get("overall_score")
+    if type(name) is not str or type(own) not in (int, float):
+        return model
+    family, _effort = _name_parts(name)
+    published = family_index.get(family)
+    own_value = float(own)
+    family_score = own_value if published is None else max(published, own_value)
+    return {
+        **model,
+        "family_capability_score": family_score,
+        "capability_tier": capability_tier_from_score(family_score),
+    }
 
 
 def _weighted(dimensions: dict[str, float], weights: dict[str, float]) -> float | None:
@@ -343,13 +395,14 @@ def lookup_scorecard_model(
         model for model in scorecard.get("models", [])
         if type(model) is dict and type(model.get("canonical_key")) is str
     ]
+    family_index = _published_family_capability_index(models)
     index = {model["canonical_key"]: model for model in models}
     exact = index.get(canonical_key)
     if exact is not None:
-        return {
-            **exact,
-            "score_resolution": "exact",
-        }
+        return _attach_family_capability(
+            {**exact, "score_resolution": "exact"},
+            family_index,
+        )
     base_key = non_thinking_canonical_key(canonical_key)
     if base_key is None:
         return None
@@ -382,7 +435,7 @@ def lookup_scorecard_model(
         "evidence": evidence,
         "score_resolution": "thinking_inherited",
     }
-    return derived
+    return _attach_family_capability(derived, family_index)
 
 
 def _source_digest(source: dict[str, Any]) -> str:
@@ -429,6 +482,10 @@ def derive_scorecard(source: dict[str, Any]) -> dict[str, Any]:
             if field in raw:
                 model[field] = raw[field]
         models.append(model)
+    family_index = _published_family_capability_index(models)
+    models = [
+        _attach_family_capability(model, family_index) for model in models
+    ]
     models.sort(key=lambda model: (-model["overall_score"], model["canonical_key"]))
     return {
         "schema_version": SCHEMA_VERSION,

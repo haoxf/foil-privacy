@@ -12,7 +12,17 @@ REASONING_DEPTH_LEVELS = {
 }
 REASONING_DEPTH_NAMES = tuple(REASONING_DEPTH_LEVELS)
 
-_EFFORT_DEPTH = {
+_RUNTIME_EFFORT_DEPTH = {
+    "none": "economy",
+    "minimal": "economy",
+    "low": "economy",
+    "medium": "standard",
+    "high": "deep",
+    "extra high": "deep",
+    "xhigh": "deep",
+    "max": "maximum",
+}
+_CODEX_ROLE_EFFORT_DEPTH = {
     "none": "economy",
     "minimal": "economy",
     "low": "economy",
@@ -42,7 +52,15 @@ def reasoning_depth_excess(actual: object, required: object) -> int:
     return REASONING_DEPTH_LEVELS[actual] - REASONING_DEPTH_LEVELS[required]
 
 
-def reasoning_depth_for_effort(effort: object) -> str | None:
+def _depth_for_effort(effort: object, table: dict[str, str]) -> str | None:
     if type(effort) is not str:
         return None
-    return _EFFORT_DEPTH.get(effort.casefold().strip())
+    return table.get(effort.casefold().strip())
+
+
+def reasoning_depth_for_effort(effort: object) -> str | None:
+    return _depth_for_effort(effort, _RUNTIME_EFFORT_DEPTH)
+
+
+def reasoning_depth_for_codex_role_effort(effort: object) -> str | None:
+    return _depth_for_effort(effort, _CODEX_ROLE_EFFORT_DEPTH)

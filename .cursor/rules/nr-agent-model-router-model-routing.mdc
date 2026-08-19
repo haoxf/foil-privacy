@@ -7,7 +7,7 @@ alwaysApply: false
 
 本 pack 把“需要什么能力”和“当前让谁执行”分开。主 Agent 持有范围、风险、产品/架构判断和验收，脚本只对冻结要求、机器评分与额度事实求交集，不从模型名字猜能力，也不改变任务风险。
 
-router 的结构化候选是一次调度的唯一能力收据：adapter 与上层只原样消费候选中的模型、来源、tier、额度池和评分证据，不再各自维护模型名→能力、模型名→额度池、启用状态或 Task slug 白名单的影子表。`tier_policy.py` 是三档顺序/比较的唯一实现，adapter 与 task runtime 也直接调用它；schema enum 只是受测试约束的边界快照。缓存刷新、失效和候选求交全部封装在工具内；Agent 不直接读写缓存，也不手工重算结果。
+router 的结构化候选是一次调度的唯一能力收据：adapter 与上层只原样消费候选中的模型、来源、tier、额度池和评分证据，不再各自维护模型名→能力、模型名→额度池、启用状态或 Task slug 白名单的影子表。`tier_policy.py` 是三档顺序/比较的唯一实现，adapter 与 task runtime 也直接调用它；schema enum 只是受测试约束的边界快照。family capability 由评分卡单一权威计算，router 只消费 `capability_tier` / `family_capability_score` 等结构化字段。缓存刷新、失效和候选求交全部封装在工具内；Agent 不直接读写缓存，也不手工重算结果。
 
 ## 调用契约
 
@@ -15,8 +15,8 @@ router 的结构化候选是一次调度的唯一能力收据：adapter 与上�
 
 - `task-class`：`exploration | micro_edit | bounded_implementation | prototype | complex_implementation | root_cause | high_risk_review`；它只描述工作类型并约束角色适用面，不代替能力、推理深度或评分。
 - `root_cause` 只表示根因尚未建立的只读证据调查：writer 必须 fail-closed，reviewer 目的改为调查稳定的故障证据包，而不是审实现 diff；根因建立后按实际改动重分类为 bounded/complex implementation。Cursor adapter 的 review 仅审实现候选，因此 root-cause 只选择 Codex 的只读 reviewer 角色。
-- `required-tier`：`weak | medium | strong` 能力下限。
-- `reasoning-depth`：`economy | standard | deep | maximum` 推理投入下限，与能力 tier 正交。对 Codex 固定角色分别映射到 Medium/Low 一类轻量 effort、High、XHigh、Max；Cursor 显式 variant 只从运行时 model id/display 的一致 effort 证据映射，无显式或冲突 effort 的静态模型 fail-closed 排除，Auto 只记 `economy`。脚本优先选择满足要求的最低深度，不能因 provider 偏好、额度、文件数或普通 strong 标签越级。
+- `required-tier`：`weak | medium | strong` 能力下限。Cursor 显式模型的 capability tier 取当前权威评分卡中同一 family 可靠可得的最高 CursorBench/overall（阈值仍为 medium≥60、strong≥67），而不是当前 effort variant 的分数。variant 自己的 overall/task/维度分数仍用于排序和显式 `--min-score`，family capability 分不能绕过这些门禁。Codex 固定角色的 tier 仍来自角色契约，公开总分不反向改写。
+- `reasoning-depth`：`economy | standard | deep | maximum` 推理投入下限，与能力 tier 正交。Cursor 运行时 effort 映射为 none/minimal/low→economy、medium→standard、high/extra high/xhigh→deep、max→maximum；无显式或冲突 effort 的静态模型 fail-closed 排除，Auto 只记 `economy`。Codex 固定角色契约不变：Medium/Low→economy、High→standard、XHigh→deep、Max→maximum。脚本优先选择满足要求的最低深度，不能因 provider 偏好、额度、文件数或普通 strong 标签越级。
 - 零个或多个 `--min-score DIMENSION=MINIMUM`：模型必须逐项达到的机器证据。支持 `overall_score`、`task_score`、`cursorbench`、`deep_swe`、`frontier_code`、`terminal_bench`、`apex_agents`、`aa_intelligence`、`gdpval_aa`、`apex_swe`、`aa_briefcase`、`harvey_lab`。
 - `--prefer-provider auto|codex|cursor`：当前任务显式 provider 软优先；用户在当前任务说“优先使用 Codex/Cursor”后，后续每次 `select` 都传对应值，直到用户更改或取消，并覆盖全局默认。省略参数时读取 `~/.config/engineering-agent-rules/dispatch-policy.json`；文件缺失默认 `auto` 且两个 adapter 启用，损坏则安全降级为 `auto` 且两个 adapter 禁用并在收据标记 `invalid`。缺键只在内存补全，不改写磁盘。偏好只在已通过任务适用面、writer/reviewer、required tier、reasoning depth、逐维评分与额度门禁，且处于最低充分推理深度、**当前宿主允许且对方运行时可用** 的候选之间改变排序，不能强行选用不合格、已耗尽、更深档或不可用的 provider；回退时收据必须包含 `preference.honored=false` 与机器生成原因。
 - `--host cursor|codex|unknown`：当前 Agent 宿主。省略时从环境检测：`CURSOR_AGENT` 为 Cursor，`CODEX_SANDBOX` / `CODEX_CI` 为 Codex；冲突或全无则 `unknown`。显式值覆盖检测。
@@ -60,9 +60,9 @@ Spark 没有与当前权威表同口径的公开分数，只能在 `exploration`
 评分缓存为本机所有项目和会话共用。两个逻辑层同存于原子提交的 `model-benchmark-bundle-v1.json`，避免来源与评分卡混代：
 
 1. `source` 是来源快照，保存固定 HTTPS 权威页面解析出的完整当前表格、版本/来源和抓取时间，不保存 HTML、cookie 或账户信息。
-2. `scorecard` 是路由评分卡，由纯脚本把第一层加工成 canonical model key、总体分、任务分、原始维度、成本和证据继承关系。Agent 与路由器只消费第二层。
+2. `scorecard` 是路由评分卡，由纯脚本把第一层加工成 canonical model key、总体分、任务分、原始维度、成本和证据继承关系，并计算同一 family 的 `family_capability_score` / `capability_tier`。Agent 与路由器只消费第二层；router 不得再按模型名或当前 effort variant 的 overall 重算定级。
 
-当前来源是 Cursor 官方 CursorBench 与官方模型对比页。多维数据可被同 family 的更高 effort 版本保守继承，并在评分卡标记来源；不能从更高 effort 反向赋给更低版本。Thinking 与非 Thinking 保持不同 key。CursorBench 若没有 Thinking 行，路由在查找时借用同档非 Thinking 的 CursorBench 分：`high` 及以下加固定政策增量 `+0.5`，且不得超过下一档已公布分减 `0.1`；`extra high` / `max` 不加增量（这些档位本身不能关闭 Thinking）。官方一旦公布 Thinking 行，精确 key 优先生效并停止派生。刷新必须先完整抓取、解析、验证并生成两层；成功才以单一原子 replace 提交 bundle，任何网络、schema、大小或写入失败都不替换 last-known-good。
+当前来源是 Cursor 官方 CursorBench 与官方模型对比页。多维数据可被同 family 的更高 effort 版本保守继承，并在评分卡标记来源；不能从更高 effort 反向赋给更低版本。同一 family 较低 effort variant 可消费该 family 最高可靠 overall 作为 capability 证据，但自己的 overall/task/维度分数保持原值。Thinking 与非 Thinking 保持不同 key。CursorBench 若没有 Thinking 行，路由在查找时借用同档非 Thinking 的 CursorBench 分：`high` 及以下加固定政策增量 `+0.5`，且不得超过下一档已公布分减 `0.1`；`extra high` / `max` 不加增量（这些档位本身不能关闭 Thinking）。官方一旦公布 Thinking 行，精确 key 优先生效并停止派生。刷新必须先完整抓取、解析、验证并生成两层；成功才以单一原子 replace 提交 bundle，任何网络、schema、大小或写入失败都不替换 last-known-good。
 
 评分默认 24 小时有效。读取永不等待网络：新鲜时直接返回；过期时立即返回 stale 并在后台单次刷新；冷启动返回 `warming` 并异步预热。跨进程锁和 2 分钟启动节流防止多会话重复刷新。需要安装后预热或诊断时才显式等待：
 
@@ -86,7 +86,7 @@ Auto 是底层型号不可观测的自适应路由器，不是一个可评分的
 
 Cursor 注入给 Task 的 `model` 白名单短于 CLI / 本路由的 `model_id`。这是宿主限制，不是模型未开启。路由与上层都不维护 Task slug 影子表；Cursor 宿主必须在 `select` 时把本会话活名单交给脚本，对 `cursor_session` 求交后再推荐。
 
-短名单是派发可用性，不是偏好升档：不在名单里的 High 不得推荐；若同深度没有可派发候选，才在名单内选更深档。不得因偏好、额度或省事把**仍可派发**的 High 升到 Extra High / Max。不得把名单外的 slug 传给 Task（尤其名单没有的 `*-fast`：平台可能静默换成更浅的 Composer Fast）。
+短名单是派发可用性，不是偏好升档：不在名单里的 High 不得推荐；若同深度没有可派发候选，才在名单内选更深档。Cursor 上 High 与 Extra High 同属 `deep`，Max 才是 `maximum`；不得因偏好、额度或省事把仍可派发的 `deep` 升到 Max。Codex 仍不得把仍可派发的 High 升到 XHigh/Max。不得把名单外的 slug 传给 Task（尤其名单没有的 `*-fast`：平台可能静默换成更浅的 Composer Fast）。
 
 仅当推荐 `executor` 为 `cursor_session` 时开 Task。已派 writer 期间，父窗口禁止对该票 `write_paths` 做生产写入。重试只使用收据 `cursor_session_retries`（脚本已从推荐与备选中筛出 `cursor_session`）。`alternatives` 会混入 `codex_adapter`；不得把那些 `model_id` 传给 Task，改走 Codex adapter。
 
@@ -94,7 +94,7 @@ Cursor 注入给 Task 的 `model` 白名单短于 CLI / 本路由的 `model_id`�
 
 1. 先把 `cursor_session_retries.same_depth` 第一项（推荐 `model_id`）传给 Task。
 2. 其余 `same_depth` 再试。父窗口与收据同一 family 且同一档时，也可省略 `model`（inherit）。
-3. 同深度都派不出去之后，可以改用更好的，不能改用更差的：按 `deeper` 再试（不重新 `select`）；父窗口同一 family 且不浅于收据时也可 inherit（Extra High 可以顶 High；High 不能顶 Extra High）。
+3. 同深度都派不出去之后，可以改用更好的，不能改用更差的：按 `deeper` 再试（不重新 `select`）；父窗口同一 family 且不浅于收据时也可 inherit（Cursor 上 Extra High 与 High 同属 `deep`，可互相顶；Max 可以顶它们，它们不能顶 Max）。
 4. Task 路径穷尽后，若收据仍有 `codex_adapter` 备选，改走 Codex adapter，不开 Task。都没有 → 停手，列出被拒 slug。禁止把 writer 或 Reviewer 留在父会话窗口，也不得改用更浅档。
 
 ## 上层 Review
