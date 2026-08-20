@@ -19,7 +19,7 @@
     ".engineering-agent-rules/tools/agent-model-router/tools/cursor_usage.py": "0ca68ea05f7cecb814039de5983ef54c4350e65997df253308ba46b495e18030",
     ".engineering-agent-rules/tools/agent-model-router/tools/dispatch_policy.py": "af21b0a7586c59a5398c17cfab81e2b4dfcd274f3df5b03f4719688ba27193b4",
     ".engineering-agent-rules/tools/agent-model-router/tools/host_policy.py": "a4b9a48e639a213af2771098792de194626acb988a701a984a0c4ab08962f614",
-    ".engineering-agent-rules/tools/agent-model-router/tools/model_identity.py": "e6eca6414659a4a792b1e1663b983592bbf453227f3e091daddc4efa55e0858e",
+    ".engineering-agent-rules/tools/agent-model-router/tools/model_identity.py": "15811481fff00f4bc9bf12f6652c1981e7edba7ee3d17dac916c221921362b1b",
     ".engineering-agent-rules/tools/agent-model-router/tools/model_score_cache.py": "2564dcbf9994ece5bc2bace91c637cf243d7234c3fcf66e858e38072c281c2c5",
     ".engineering-agent-rules/tools/agent-model-router/tools/quota_cache.py": "82f2f29262e1b72b362a26ebd35564c0e0cbea3f9de37da28d5ed106bcab8597",
     ".engineering-agent-rules/tools/agent-model-router/tools/reasoning_policy.py": "74d316e92ee822bf47767eb8961fa708ec530878f4993f1861d505c293372e93",
@@ -56,7 +56,7 @@
     "nr-stall-handling.mdc": "3cc51104124de7540bb1dc6c23a96372493edbea1be5539ba5c8eb579c32fb72",
     "nr-user-facing-reply.mdc": "664d59cf68c632469dbe90c9e2874f23cf6b85142cc2379c790a10ba9c0e5571"
   },
-  "installed_package_sha256": "ceb659d3056cb4566bc54b5f853f42bfa83e29ed885006809b9d5e284e10ab5e",
+  "installed_package_sha256": "2c3d549c75ae9e516ca19b13e1e12c78e1cb689c7ba018f5e29be2b1b5118e45",
   "packs": [
     "agent-model-router",
     "agent-session-kits",
@@ -70,9 +70,9 @@
   ],
   "rule_filename_prefix": "nr-",
   "schema_version": 4,
-  "source_commit": "d5da198fde85e5cff2a4b106ffa1ecd706f6adf5",
+  "source_commit": "7e4e5ee467e6c1b07c72ffba6814e5ac0a53d7e5",
   "source_dirty": false,
-  "source_package_sha256": "ceb659d3056cb4566bc54b5f853f42bfa83e29ed885006809b9d5e284e10ab5e",
+  "source_package_sha256": "2c3d549c75ae9e516ca19b13e1e12c78e1cb689c7ba018f5e29be2b1b5118e45",
   "source_path": "/Users/dingping/XCodeProjects/engineering-agent-rules",
   "source_url": "https://github.com/haoxf/engineering-agent-rules.git",
   "template_overrides": {}

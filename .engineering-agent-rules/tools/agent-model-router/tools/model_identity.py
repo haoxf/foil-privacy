@@ -10,7 +10,7 @@ RECEIPT_KEY_PATTERN = re.compile(r"[a-z0-9]{1,160}")
 
 
 def normalise_model_name(value: str) -> str:
-    value = re.sub(r"\b(?:cursor|fast|no\s*zdr|1m)\b", " ", value, flags=re.I)
+    value = re.sub(r"\b(?:cursor|current|fast|no\s*zdr|1m)\b", " ", value, flags=re.I)
     value = re.sub(
         r"\bextra[ -]?high\b|\bxhigh\b", " extra high ", value, flags=re.I,
     )
@@ -76,7 +76,7 @@ def _receipt_parts(
         "nozdr": re.search(r"\bno\s*zdr\b", folded) is not None or "nozdr" in extra_flags,
     }
     base = re.sub(
-        r"\b(?:cursor|fast|no\s*zdr|1m|extra[ -]?high|xhigh|max|high|medium|minimal|low|none)\b|[()]",
+        r"\b(?:cursor|current|fast|no\s*zdr|1m|extra[ -]?high|xhigh|max|high|medium|minimal|low|none)\b|[()]",
         " ", value, flags=re.I,
     )
     key = re.sub(r"[^a-z0-9]+", "", base.casefold())
@@ -136,6 +136,12 @@ def receipt_key_matches(expected_key: str, reported_model: str | None) -> bool:
     if expected_key == "auto":
         return re.fullmatch(r"auto(?:\s*\([^\r\n]*\))?", reported, re.I) is not None
     try:
-        return _receipt_parts(reported) == expected_key
+        if _receipt_parts(reported) == expected_key:
+            return True
+        if _display_effort(reported) is not None:
+            return False
+        # Cursor currently defaults unlabelled family receipts to High. If that
+        # default changes, update this fallback; absence never means any effort.
+        return _receipt_parts(reported, fallback_effort="high") == expected_key
     except ValueError:
         return False
