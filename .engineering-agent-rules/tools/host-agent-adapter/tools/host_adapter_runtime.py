@@ -12,7 +12,7 @@ import shutil
 import signal
 import subprocess
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Protocol
 import time
 
 
@@ -20,6 +20,20 @@ ADAPTER_DEPTH_ENV = "ENGINEERING_AGENT_RULES_ADAPTER_DEPTH"
 STDERR_LIMIT = 1200
 DEFAULT_TIMEOUT_SECONDS = 3600.0
 CODEX_SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
+
+
+class ProcessProgress(Protocol):
+    """Optional, best-effort observer for long-running child processes."""
+
+    def started(self, attempt: int) -> None: ...
+
+    def feed_stdout(self, chunk: bytes, attempt: int) -> None: ...
+
+    def heartbeat_if_due(self, attempt: int) -> None: ...
+
+    def process_cleanup(self, reason: str, attempt: int) -> None: ...
+
+    def finish(self, attempt: int) -> None: ...
 
 
 def load_sibling_module(
@@ -125,9 +139,14 @@ def _stop_group(process: subprocess.Popen[str]) -> None:
 def run_process(
     command: list[str], *, cwd: Path | None, input_text: str | None,
     timeout_seconds: float, env: Mapping[str, str] | None,
+    progress: ProcessProgress | None = None, attempt: int = 1,
 ) -> dict[str, Any]:
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
+    if attempt <= 0:
+        raise ValueError("attempt must be positive")
+    if progress is not None:
+        progress.started(attempt)
     try:
         process = subprocess.Popen(
             command, cwd=cwd, env=None if env is None else dict(env),
@@ -170,6 +189,8 @@ def run_process(
             now = time.monotonic()
             if now >= deadline:
                 timed_out = True
+                if progress is not None:
+                    progress.process_cleanup("timeout", attempt)
                 _stop_group(process)
                 try:
                     process.wait(timeout=0.5)
@@ -208,18 +229,26 @@ def run_process(
                     close_stream(file_object)
                 elif key.data == "stdout":
                     stdout_chunks.append(chunk)
+                    if progress is not None:
+                        progress.feed_stdout(chunk, attempt)
                 else:
                     stderr_chunks.append(chunk)
+            if progress is not None:
+                progress.heartbeat_if_due(attempt)
     finally:
         for key in list(selector.get_map().values()):
             close_stream(key.fileobj)
         selector.close()
     if process.poll() is None:
+        if progress is not None:
+            progress.process_cleanup("incomplete", attempt)
         _stop_group(process)
         try:
             process.wait(timeout=0.5)
         except subprocess.TimeoutExpired:
             lingering = True
+    if progress is not None:
+        progress.finish(attempt)
     return {
         "returncode": process.returncode,
         "stdout": text(b"".join(stdout_chunks)),

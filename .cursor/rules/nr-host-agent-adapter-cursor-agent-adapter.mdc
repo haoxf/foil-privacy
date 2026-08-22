@@ -25,7 +25,7 @@ run --repo ROOT --allowed-write-path PATH --required-tier weak|medium|strong
     --model MODEL --model-source auto|third_party|cursor_native
 ```
 
-wrapper 启动前再次读取 `dispatch-policy.json`；禁用或策略损坏时不启动。允许时使用 `--print --force --trust --sandbox enabled --output-format stream-json`。`--allowed-write-path` 只写入简报，不当硬门禁。prompt 不进 argv、stdout 或 receipt。system init 形成 model receipt；核对失败时 `model_receipt_mismatch`。成功终态返回 `candidate_ready` 和 `upper_review_required: true`。
+wrapper 启动前再次读取 `dispatch-policy.json`；禁用或策略损坏时不启动。允许时使用 `--print --force --trust --sandbox enabled --output-format stream-json`。`--allowed-write-path` 只写入简报，不当硬门禁。prompt 不进 argv、stdout 或 receipt。stdout 始终只输出一份最终 JSON receipt；长任务仅向 stderr 立即 flush 固定形态、脱敏的阶段/事件计数与 heartbeat，不透传 prompt、模型正文、工具参数、模型名、路径、diff 或原始 stream。system init 形成 model receipt；核对失败时 `model_receipt_mismatch`。成功终态返回 `candidate_ready` 和 `upper_review_required: true`。
 
 ## 显式只读 Review
 
