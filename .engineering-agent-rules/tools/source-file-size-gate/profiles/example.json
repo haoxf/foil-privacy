@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "source_roots": [
+    "Sources",
+    "scripts"
+  ],
+  "include_globs": [
+    "**/*.py",
+    "**/*.c",
+    "**/*.cc",
+    "**/*.cpp",
+    "**/*.cxx",
+    "**/*.h",
+    "**/*.hh",
+    "**/*.hpp",
+    "**/*.hxx"
+  ],
+  "exclude_globs": [
+    ".engineering-agent-rules/**",
+    "**/Generated/**",
+    "**/generated/**",
+    "**/*.generated.*",
+    "**/*_generated.*"
+  ],
+  "allowlist_path": "Docs/source-file-size-allowlist.json",
+  "threshold": 1000
+}

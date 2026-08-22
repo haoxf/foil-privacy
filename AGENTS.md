@@ -5,7 +5,7 @@
 
 基线由 `.cursor/rules/` 下已安装的 `nr-*.mdc` 提供。Cursor 按 frontmatter / globs 路由；Codex 等非 Cursor Agent 须按下方索引打开匹配规则，勿依赖未列出的全文。始终生效规则无需场景触发。
 
-已安装 pack：`agent-model-router`, `agent-session-kits`, `agent-task-runtime`, `codex-agent-team`, `host-agent-adapter`
+已安装 pack：`agent-model-router`, `agent-session-kits`, `agent-task-runtime`, `codex-agent-team`, `host-agent-adapter`, `source-file-size-gate`
 
 始终生效：
 
@@ -29,6 +29,7 @@
 - Codex Agent adapter——经 stdin `-` 同步调用 Codex CLI 并返回请求侧收据 → `.cursor/rules/nr-host-agent-adapter-codex-agent-adapter.mdc`
 - Cursor Agent adapter——同步执行或只读审查合格叶子并返回最小事实收据 → `.cursor/rules/nr-host-agent-adapter-cursor-agent-adapter.mdc`
 - 共享规则维护——规则变更后同步项目路由、引用与托管状态 → `.cursor/rules/nr-rules-maintenance.mdc`
+- 源码文件体量硬阈值门禁——已安装则映射验证必须跑检查器；新建、首越或存量增长默认失败 → `.cursor/rules/nr-source-file-size-gate-file-size-gate.mdc`
 - 共享卡住处理——假停、待决账本与有界重试；不定义调度或 Git 授权 → `.cursor/rules/nr-stall-handling.mdc`
 
 项目私有规则、命令、架构与测试映射仍是项目具体细节的真源；它们负责补充项目参数，不应静默弱化共享安全或隔离约束。所需项目资源缺失但参数可由现有规则唯一确定时，Agent 应补齐并验证后继续；存在真实团队选择时再停止询问。确需偏离共享约束时须明确写出范围与理由。
