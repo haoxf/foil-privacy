@@ -26,6 +26,6 @@ wrapper 启动前再读 `dispatch-policy.json`；禁用或策略损坏时不启�
 
 `codex exec - --json --ephemeral -s <sandbox> -m <model> -c model_reasoning_effort=<effort>`
 
-stdin 必须是位置参数 `-`；成功 JSONL 无 model/effort，收据记录**请求侧**值。writer 用 `workspace-write`，显式 `review` 子命令仍走 `codex exec`（`read-only`），不用 `codex review`。`--allowed-write-path` 若保留只写入简报，不当硬门禁。Git 可见改动只作可选事实，不因此 fail-closed。验收由上层 Review 看 diff。
+stdin 必须是位置参数 `-`；成功 JSONL 无 model/effort，收据记录**请求侧**值。writer 用 `workspace-write`，显式 `review` 子命令仍走 `codex exec`（`read-only`），不用 `codex review`。`--allowed-write-path` 若保留只写入简报，不当硬门禁。stdout 始终只输出一份最终 JSON receipt；长任务仅向 stderr 立即 flush 固定形态、脱敏的阶段/事件计数与 heartbeat，不透传 prompt、模型正文、工具参数、模型/effort、路径、diff 或原始 stream。stderr 缺失或写失败只禁用进度，不得改变等待、超时清理或最终收据。Git 可见改动只作可选事实，不因此 fail-closed。验收由上层 Review 看 diff。
 
 `You've hit your usage limit` / `turn.failed` → `report-limit` 并回退。ChatGPT 账户「not supported when using Codex with a ChatGPT account」只淘汰该候选。

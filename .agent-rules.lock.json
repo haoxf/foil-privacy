@@ -32,7 +32,7 @@
     ".engineering-agent-rules/tools/agent-task-runtime/tools/task_runtime/model.py": "d4bc997af7d6677696d320c174857a7d30ada28988e78f6ba653f219b59eb811",
     ".engineering-agent-rules/tools/agent-task-runtime/tools/task_runtime/store.py": "9505cb2f6a663f48f028f9e714a9970c4e623e28225f078e98724f2423a1579e",
     ".engineering-agent-rules/tools/agent-task-runtime/tools/task_runtime/workflow.py": "49bc8815cf8a2d8e1e75737e3cd4c81ea38d6ef1cae81e58a78098ad12b3017c",
-    ".engineering-agent-rules/tools/host-agent-adapter/tools/codex_agent_adapter.py": "c2bbcf777d4b6a3d3ac7260ad2095b60722a03cf2d4e0304f5c27cbd54d5f5e0",
+    ".engineering-agent-rules/tools/host-agent-adapter/tools/codex_agent_adapter.py": "163da910a6f59eabceee713dcb6054a09a570f9f21318c0d438981d2ad180ab2",
     ".engineering-agent-rules/tools/host-agent-adapter/tools/cursor_agent_adapter.py": "0e11421f84d10f910cf24e3a3241983888be5f5f40e481881b32047dc4983053",
     ".engineering-agent-rules/tools/host-agent-adapter/tools/host_adapter_runtime.py": "0d6bd771d16e2e4266c71b30f0445e6066c0af1627aaf34a941750e6dc0f445a",
     ".engineering-agent-rules/tools/source-file-size-gate/profiles/allowlist.example.json": "1a53dacac2848b1e0f8989f876d8f7b27c1afc641c6fb7fc2348f15d24551c6a",
@@ -52,7 +52,7 @@
     "nr-coding-discipline.mdc": "1ce41285311e5ebfcb17c904b819e44e2882a116cede50fa49d44f6c7ca28aa9",
     "nr-delivery-gate.mdc": "4797876c908d90e0125d8ddf7ef05d5db2d5ce941ddd091b3614e08aa4a714c3",
     "nr-git-workflow.mdc": "022c59c4da3a93cbb4f5e50b40556bb59a151d2e40b67ee396a8475590afc34b",
-    "nr-host-agent-adapter-codex-agent-adapter.mdc": "cda7ba26f8b3cfdb4bcd33d0fe51fb0f09b8c473799271c01baae546d192c944",
+    "nr-host-agent-adapter-codex-agent-adapter.mdc": "b47c70261fcc792cecd270e42fce20a98a5c7321af9c1f324c6530d6e67c25b4",
     "nr-host-agent-adapter-cursor-agent-adapter.mdc": "72f19d356e8d115662850ee2bb184b72511b8a238d49ad9604138f757a1d948a",
     "nr-host-agent-adapter-execution-trigger.mdc": "1be37a7ac9f1c7932aedd1cb5c6026646ba0a7e13d3ad087b7eac0edfd8ed72c",
     "nr-rules-maintenance.mdc": "f8893145ee6be346a658fddb099d9c295d8e68626ba0e4cebf4ca9637256d5f0",
@@ -60,7 +60,7 @@
     "nr-stall-handling.mdc": "3cc51104124de7540bb1dc6c23a96372493edbea1be5539ba5c8eb579c32fb72",
     "nr-user-facing-reply.mdc": "664d59cf68c632469dbe90c9e2874f23cf6b85142cc2379c790a10ba9c0e5571"
   },
-  "installed_package_sha256": "fa9af24dd5fd1f3d18d27841c876d349cc3d6c7daa323ee603c6fc66b16bbee6",
+  "installed_package_sha256": "e89249776eb11d412802f07aa8f53f033dc8c3e4ae519eaf620097d3906b97c3",
   "packs": [
     "agent-model-router",
     "agent-session-kits",
@@ -76,9 +76,9 @@
   ],
   "rule_filename_prefix": "nr-",
   "schema_version": 4,
-  "source_commit": "63068243779f535df9669182f2e513bb7dffb247",
+  "source_commit": "6442fc22d655752261a5e788a1f93df743ff07f3",
   "source_dirty": false,
-  "source_package_sha256": "fa9af24dd5fd1f3d18d27841c876d349cc3d6c7daa323ee603c6fc66b16bbee6",
+  "source_package_sha256": "e89249776eb11d412802f07aa8f53f033dc8c3e4ae519eaf620097d3906b97c3",
   "source_path": "/Users/dingping/XCodeProjects/engineering-agent-rules",
   "source_url": "https://github.com/haoxf/engineering-agent-rules.git",
   "template_overrides": {}
