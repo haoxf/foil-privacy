@@ -19,7 +19,8 @@ GATE_ID = "source-file-size-gate"
 REPORT_SCHEMA_VERSION = 1
 POLICY_VERSION = 1
 MAXIMUM_THRESHOLD = 1000
-MANAGED_PREFIX = ".engineering-agent-rules/"
+BUILTIN_EXCLUDED_ROOTS = frozenset({".engineering-agent-rules", ".git"})
+EMPTY_ALLOWLIST_BYTES = b'{"schema_version":1,"waivers":[]}\n'
 PROFILE_REQUIRED = {
     "schema_version",
     "source_roots",
@@ -218,8 +219,42 @@ def load_allowlist_snapshot(
     return by_key
 
 
-def is_managed_path(relative: str) -> bool:
-    return relative == ".engineering-agent-rules" or relative.startswith(MANAGED_PREFIX)
+def load_allowlist_from_repo(
+    repo: Path,
+    relative: str,
+    threshold: int,
+) -> dict[str, Any]:
+    """Allowlist 文件缺失视为空表；路径上的符号链接或非普通文件失败。"""
+    assert_repo_relative_path(relative, label="profile.allowlist_path")
+    cursor = repo
+    for part in Path(relative).parts:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            raise GateError(f"profile.allowlist_path 禁止符号链接：{relative}")
+        if not cursor.exists():
+            return {
+                "present": False,
+                "path": repo / relative,
+                "resolved": None,
+                "snapshot": EMPTY_ALLOWLIST_BYTES,
+                "waivers": {},
+            }
+    path = resolve_inside_repo(
+        repo, relative, label="profile.allowlist_path", expect="file"
+    )
+    snapshot = read_regular_file_snapshot(path, label="allowlist")
+    return {
+        "present": True,
+        "path": path,
+        "resolved": resolved_path_snapshot(path, label="allowlist"),
+        "snapshot": snapshot,
+        "waivers": load_allowlist_snapshot(snapshot, path, threshold),
+    }
+
+
+def is_builtin_excluded(relative: str) -> bool:
+    root = relative.split("/", 1)[0]
+    return root in BUILTIN_EXCLUDED_ROOTS
 
 
 def matches(relative: str, patterns: list[str], *, directory: bool = False) -> bool:
@@ -230,7 +265,7 @@ def matches(relative: str, patterns: list[str], *, directory: bool = False) -> b
 
 
 def is_excluded(relative: str, patterns: list[str], *, directory: bool = False) -> bool:
-    return is_managed_path(relative) or matches(relative, patterns, directory=directory)
+    return is_builtin_excluded(relative) or matches(relative, patterns, directory=directory)
 
 
 def is_included(relative: str, patterns: list[str]) -> bool:
@@ -267,8 +302,6 @@ def list_source_files(
     source_roots: list[str],
     include_globs: list[str],
     exclude_globs: list[str],
-    *,
-    allow_empty: bool = False,
 ) -> list[Path]:
     repo_root = root.resolve()
     files: dict[str, Path] = {}
@@ -302,11 +335,6 @@ def list_source_files(
                     raise GateError(f"source_roots 内条目必须是普通文件：{relative}")
                 if is_included(relative, include_globs):
                     files[relative] = path
-    if not files and not allow_empty:
-        raise GateError(
-            "source_roots 未匹配到任何 include_globs 普通源码文件；"
-            "请修正 profile，不得空跑报通过"
-        )
     return [files[key] for key in sorted(files)]
 
 
@@ -536,12 +564,8 @@ def run_gate(
     includes = profile["include_globs"]
     excludes = profile["exclude_globs"]
     threshold = profile["threshold"]
-    allowlist_path = resolve_inside_repo(
-        repo, profile["allowlist_path"], label="profile.allowlist_path", expect="file"
-    )
-    allowlist_snapshot = read_regular_file_snapshot(allowlist_path, label="allowlist")
-    allowlist_resolved = resolved_path_snapshot(allowlist_path, label="allowlist")
-    waivers = load_allowlist_snapshot(allowlist_snapshot, allowlist_path, threshold)
+    allowlist = load_allowlist_from_repo(repo, profile["allowlist_path"], threshold)
+    waivers = allowlist["waivers"]
     candidate_files = list_source_files(repo, roots, includes, excludes)
     baseline_commit = resolve_baseline_commit(repo, baseline_ref)
 
@@ -589,12 +613,15 @@ def run_gate(
         label="profile",
         expected_resolved_path=profile_resolved,
     )
-    assert_file_snapshot(
-        allowlist_path,
-        allowlist_snapshot,
-        label="allowlist",
-        expected_resolved_path=allowlist_resolved,
-    )
+    if allowlist["present"]:
+        assert_file_snapshot(
+            allowlist["path"],
+            allowlist["snapshot"],
+            label="allowlist",
+            expected_resolved_path=allowlist["resolved"],
+        )
+    elif allowlist["path"].exists():
+        raise GateError("allowlist 在判定期间被创建；拒绝输出错配证据，请冻结后重跑")
 
     hits = threshold_hits(baseline_sizes, candidate_sizes, threshold, waivers)
     violations = [
@@ -621,7 +648,7 @@ def run_gate(
             "profile_path": str(profile_path),
             "profile_sha256": hashlib.sha256(profile_snapshot).hexdigest(),
             "allowlist_path": profile["allowlist_path"],
-            "allowlist_sha256": hashlib.sha256(allowlist_snapshot).hexdigest(),
+            "allowlist_sha256": hashlib.sha256(allowlist["snapshot"]).hexdigest(),
             "source_roots": roots,
             "include_globs": includes,
             "exclude_globs": excludes,
