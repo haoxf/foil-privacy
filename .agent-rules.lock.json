@@ -70,7 +70,7 @@
   ],
   "rule_filename_prefix": "nr-",
   "schema_version": 4,
-  "source_commit": "acdd8b4235fec7800378505d9e56513333fb2d28",
+  "source_commit": "70290c42ed8687604e50e037c2601f196a01ffda",
   "source_dirty": false,
   "source_package_sha256": "2c3d549c75ae9e516ca19b13e1e12c78e1cb689c7ba018f5e29be2b1b5118e45",
   "source_path": "/Users/dingping/XCodeProjects/engineering-agent-rules",
