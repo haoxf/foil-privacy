@@ -7,12 +7,13 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import selectors
 import shutil
 import signal
 import subprocess
 from collections.abc import Mapping, Sequence
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol, TextIO
 import time
 
 
@@ -20,6 +21,8 @@ ADAPTER_DEPTH_ENV = "ENGINEERING_AGENT_RULES_ADAPTER_DEPTH"
 STDERR_LIMIT = 1200
 DEFAULT_TIMEOUT_SECONDS = 3600.0
 CODEX_SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
+_SAFE_PROGRESS_TOKEN = re.compile(r"^[a-z0-9_]+$")
+_SAFE_PROGRESS_PROVIDER = re.compile(r"^[a-z0-9]+$")
 
 
 class ProcessProgress(Protocol):
@@ -34,6 +37,130 @@ class ProcessProgress(Protocol):
     def process_cleanup(self, reason: str, attempt: int) -> None: ...
 
     def finish(self, attempt: int) -> None: ...
+
+
+class JsonlProgressReporter:
+    """Emit safe lifecycle progress while treating valid JSONL as activity."""
+
+    def __init__(
+        self, *, provider: str, stream: TextIO | None,
+        event_stage: Callable[[dict[str, Any]], str | None],
+        heartbeat_interval_seconds: float,
+        min_heartbeat_interval_seconds: float,
+    ) -> None:
+        if not _SAFE_PROGRESS_PROVIDER.fullmatch(provider):
+            raise ValueError("unsafe progress provider")
+        self._provider = provider
+        self._stream = stream
+        self._event_stage = event_stage
+        self._heartbeat_interval_seconds = heartbeat_interval_seconds
+        self._min_heartbeat_interval_seconds = min_heartbeat_interval_seconds
+        self._started_at = time.monotonic()
+        self._next_heartbeat = self._started_at + heartbeat_interval_seconds
+        self._event_count = 0
+        self._phase = "starting"
+        self._emitted: set[str] = set()
+        self._enabled = stream is not None
+        self._pending = bytearray()
+
+    def _write(self, stage: str, **fields: int | bool | str) -> None:
+        if not self._enabled:
+            return
+        stream = self._stream
+        if stream is None:
+            self._enabled = False
+            return
+        if not _SAFE_PROGRESS_TOKEN.fullmatch(stage):  # pragma: no cover
+            raise ValueError("unsafe progress stage")
+        parts = [
+            f"{self._provider}-adapter progress", f"stage={stage}",
+            f"elapsed={time.monotonic() - self._started_at:.1f}s",
+            f"events={self._event_count}",
+        ]
+        for key, value in fields.items():
+            if not _SAFE_PROGRESS_TOKEN.fullmatch(key):  # pragma: no cover
+                raise ValueError("unsafe progress field")
+            if isinstance(value, bool):
+                rendered = "true" if value else "false"
+            elif isinstance(value, int):
+                rendered = str(value)
+            elif _SAFE_PROGRESS_TOKEN.fullmatch(value):
+                rendered = value
+            else:  # pragma: no cover
+                raise ValueError("unsafe progress value")
+            parts.append(f"{key}={rendered}")
+        try:
+            print(" ".join(parts), file=stream, flush=True)
+        except (BlockingIOError, OSError, ValueError):
+            self._enabled = False
+
+    def _once(self, stage: str, **fields: int | bool | str) -> None:
+        if stage in self._emitted:
+            return
+        self._emitted.add(stage)
+        self._phase = stage
+        self._write(stage, **fields)
+
+    def started(self, attempt: int) -> None:
+        self._once("started", attempt=attempt)
+
+    def feed_stdout(self, chunk: bytes, attempt: int) -> bool:
+        self._pending.extend(chunk)
+        activity = False
+        while True:
+            newline = self._pending.find(b"\n")
+            if newline < 0:
+                return activity
+            line = bytes(self._pending[:newline])
+            del self._pending[:newline + 1]
+            activity = self._consume(line, attempt) or activity
+
+    def _consume(self, line: bytes, attempt: int) -> bool:
+        if not line.strip():
+            return False
+        try:
+            event = json.loads(line)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return False
+        if type(event) is not dict:
+            return False
+        event_type = event.get("type")
+        if type(event_type) is not str or not event_type:
+            return False
+        self._event_count += 1
+        try:
+            stage = self._event_stage(event)
+            if stage is not None:
+                if not _SAFE_PROGRESS_TOKEN.fullmatch(stage):
+                    raise ValueError("unsafe progress stage")
+                self._once(stage, attempt=attempt)
+        except Exception:
+            # Provider-specific stage hints are optional observer data. A malformed
+            # event must not escape into process waiting, cleanup, or final receipts.
+            self._event_stage = lambda _event: None
+            self._phase = "events"
+        return True
+
+    def heartbeat_if_due(self, attempt: int) -> None:
+        now = time.monotonic()
+        if now < self._next_heartbeat:
+            return
+        self._write("heartbeat", attempt=attempt, phase=self._phase)
+        self._next_heartbeat = now + max(
+            self._heartbeat_interval_seconds,
+            self._min_heartbeat_interval_seconds,
+        )
+
+    def process_cleanup(self, reason: str, attempt: int) -> None:
+        self._once("process_cleanup", attempt=attempt, reason=reason)
+
+    def finish(self, attempt: int) -> None:
+        if self._pending:
+            self._consume(bytes(self._pending), attempt)
+            self._pending.clear()
+
+    def completed(self, status: str, attempts: int) -> None:
+        self._once("completed", status=status, attempts=attempts)
 
 
 def load_sibling_module(

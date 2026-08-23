@@ -9,7 +9,6 @@ import json
 from pathlib import Path
 import re
 import sys
-import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -27,7 +26,6 @@ MODEL_UNSUPPORTED_PHRASES = (
 _UPPER_REVIEW_MARKER = re.compile(
     r"(?m)^AGENT_MODEL_REVIEW:\s*(PASS|BLOCKED|UNAVAILABLE)\s*$",
 )
-_SAFE_PROGRESS_TOKEN = re.compile(r"^[a-z0-9_]+$")
 QUOTA_POOLS = {"codex_main", "codex_spark"}
 
 
@@ -37,107 +35,8 @@ _TIER = None
 _REASONING = None
 
 
-class _ProgressReporter:
-    """Emit fixed-shape progress without forwarding Codex-owned content."""
-
-    def __init__(self) -> None:
-        self._stream = sys.stderr
-        self._started_at = time.monotonic()
-        self._next_heartbeat = self._started_at + HEARTBEAT_INTERVAL_SECONDS
-        self._event_count = 0
-        self._phase = "starting"
-        self._emitted: set[str] = set()
-        self._enabled = self._stream is not None
-        self._pending = bytearray()
-
-    def _write(self, stage: str, **fields: int | bool | str) -> None:
-        if not self._enabled:
-            return
-        stream = self._stream
-        if stream is None:
-            self._enabled = False
-            return
-        if not _SAFE_PROGRESS_TOKEN.fullmatch(stage):  # pragma: no cover
-            raise ValueError("unsafe progress stage")
-        parts = [
-            "codex-adapter progress", f"stage={stage}",
-            f"elapsed={time.monotonic() - self._started_at:.1f}s",
-            f"events={self._event_count}",
-        ]
-        for key, value in fields.items():
-            if not _SAFE_PROGRESS_TOKEN.fullmatch(key):  # pragma: no cover
-                raise ValueError("unsafe progress field")
-            if isinstance(value, bool):
-                rendered = "true" if value else "false"
-            elif isinstance(value, int):
-                rendered = str(value)
-            elif _SAFE_PROGRESS_TOKEN.fullmatch(value):
-                rendered = value
-            else:  # pragma: no cover
-                raise ValueError("unsafe progress value")
-            parts.append(f"{key}={rendered}")
-        try:
-            print(" ".join(parts), file=stream, flush=True)
-        except (BlockingIOError, OSError, ValueError):
-            self._enabled = False
-
-    def _once(self, stage: str, **fields: int | bool | str) -> None:
-        if stage in self._emitted:
-            return
-        self._emitted.add(stage)
-        self._phase = stage
-        self._write(stage, **fields)
-
-    def started(self, attempt: int) -> None:
-        self._once("started", attempt=attempt)
-
-    def feed_stdout(self, chunk: bytes, attempt: int) -> bool:
-        self._pending.extend(chunk)
-        activity = False
-        while True:
-            newline = self._pending.find(b"\n")
-            if newline < 0:
-                return activity
-            line = bytes(self._pending[:newline])
-            del self._pending[:newline + 1]
-            activity = self._consume(line, attempt) or activity
-
-    def _consume(self, line: bytes, attempt: int) -> bool:
-        if not line.strip():
-            return False
-        try:
-            event = json.loads(line)
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            return False
-        if type(event) is not dict:
-            return False
-        event_type = event.get("type")
-        if type(event_type) is not str or not event_type:
-            return False
-        self._event_count += 1
-        if event_type == "thread.started":
-            self._once("thread_started", attempt=attempt)
-        return True
-
-    def heartbeat_if_due(self, attempt: int) -> None:
-        now = time.monotonic()
-        if now < self._next_heartbeat:
-            return
-        self._write("heartbeat", attempt=attempt, phase=self._phase)
-        self._next_heartbeat = now + max(
-            HEARTBEAT_INTERVAL_SECONDS, MIN_HEARTBEAT_INTERVAL_SECONDS,
-        )
-
-    def process_cleanup(self, reason: str, attempt: int) -> None:
-        self._once("process_cleanup", attempt=attempt, reason=reason)
-
-    def finish(self, attempt: int) -> None:
-        if self._pending:
-            self._consume(bytes(self._pending), attempt)
-            self._pending.clear()
-
-    def completed(self, status: str, attempts: int) -> None:
-        self._once("completed", status=status, attempts=attempts)
+def _progress_stage(event: dict[str, Any]) -> str | None:
+    return "thread_started" if event.get("type") == "thread.started" else None
 
 
 def _load_tools() -> None:
@@ -409,7 +308,11 @@ def run_codex(
     command = build_argv(
         executable=resolved, model=model, effort=reasoning_effort, sandbox=sandbox,
     )
-    progress = _ProgressReporter()
+    progress = _RUNTIME.JsonlProgressReporter(
+        provider="codex", stream=sys.stderr, event_stage=_progress_stage,
+        heartbeat_interval_seconds=HEARTBEAT_INTERVAL_SECONDS,
+        min_heartbeat_interval_seconds=MIN_HEARTBEAT_INTERVAL_SECONDS,
+    )
     process = _RUNTIME.run_process(
         command, cwd=repo_path, input_text=brief,
         timeout_seconds=timeout_seconds, env=_RUNTIME.adapter_environ(env),
