@@ -17,7 +17,7 @@ from typing import Any
 
 GATE_ID = "source-file-size-gate"
 REPORT_SCHEMA_VERSION = 1
-POLICY_VERSION = 1
+POLICY_VERSION = 2
 MAXIMUM_THRESHOLD = 1000
 BUILTIN_EXCLUDED_ROOTS = frozenset({".engineering-agent-rules", ".git"})
 EMPTY_ALLOWLIST_BYTES = b'{"schema_version":1,"waivers":[]}\n'
@@ -253,15 +253,32 @@ def load_allowlist_from_repo(
 
 
 def is_builtin_excluded(relative: str) -> bool:
-    root = relative.split("/", 1)[0]
-    return root in BUILTIN_EXCLUDED_ROOTS
+    return relative.split("/", 1)[0] in BUILTIN_EXCLUDED_ROOTS
+
+
+def is_binary_blob(contents: bytes) -> bool:
+    return b"\0" in contents
+
+
+def expand_glob(pattern: str) -> tuple[str, ...]:
+    """`**/` 在仓库根也匹配零个路径段；纯 `Path.match('**/dir/**')` 做不到。"""
+    if pattern.startswith("**/"):
+        rest = pattern[3:]
+        if rest:
+            return (pattern, rest)
+    return (pattern,)
 
 
 def matches(relative: str, patterns: list[str], *, directory: bool = False) -> bool:
     probes = [relative]
     if directory:
         probes.append(f"{relative.rstrip('/')}/_")
-    return any(Path(probe).match(pattern) for pattern in patterns for probe in probes)
+    return any(
+        Path(probe).match(expanded)
+        for pattern in patterns
+        for expanded in expand_glob(pattern)
+        for probe in probes
+    )
 
 
 def is_excluded(relative: str, patterns: list[str], *, directory: bool = False) -> bool:
@@ -297,44 +314,62 @@ def resolved_source_roots(root: Path, source_roots: list[str]) -> list[Path]:
     return bases
 
 
+def git_nul_paths(repo: Path, arguments: list[str], *, label: str) -> list[str]:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *arguments],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = os.fsdecode((result.stderr or result.stdout).strip())
+        raise GateError(f"{label} 失败：{detail}")
+    paths: list[str] = []
+    for raw in result.stdout.split(b"\0"):
+        if not raw:
+            continue
+        relative = os.fsdecode(raw)
+        assert_repo_relative_path(relative, label=label)
+        paths.append(relative)
+    return paths
+
+
 def list_source_files(
     root: Path,
     source_roots: list[str],
     include_globs: list[str],
     exclude_globs: list[str],
+    *,
+    baseline_commit: str,
 ) -> list[Path]:
+    """只检查相对基线的变更：tracked diff + 未被 git 忽略的未跟踪文件。"""
     repo_root = root.resolve()
+    resolved_source_roots(root, source_roots)
+    changed = git_nul_paths(
+        repo_root,
+        ["diff", "--name-only", "--no-renames", "-z", baseline_commit, "--", *source_roots],
+        label="git diff",
+    )
+    untracked = git_nul_paths(
+        repo_root,
+        ["ls-files", "-z", "--others", "--exclude-standard", "--", *source_roots],
+        label="git ls-files",
+    )
     files: dict[str, Path] = {}
-
-    def fail_walk(error: OSError) -> None:
-        raise GateError(f"无法遍历 source_roots：{error}") from error
-
-    for base in resolved_source_roots(root, source_roots):
-        for current, directory_names, file_names in os.walk(
-            base, followlinks=False, onerror=fail_walk
-        ):
-            current_path = Path(current)
-            for name in list(directory_names):
-                path = current_path / name
-                relative = path.relative_to(repo_root).as_posix()
-                assert_repo_relative_path(relative, label="candidate directory path")
-                if is_excluded(relative, exclude_globs, directory=True):
-                    directory_names.remove(name)
-                    continue
-                if path.is_symlink():
-                    raise GateError(f"source_roots 内禁止未排除的目录符号链接：{relative}")
-            for name in file_names:
-                path = current_path / name
-                relative = path.relative_to(repo_root).as_posix()
-                assert_repo_relative_path(relative, label="candidate file path")
-                if is_excluded(relative, exclude_globs):
-                    continue
-                if path.is_symlink():
-                    raise GateError(f"source_roots 内禁止未排除的文件符号链接：{relative}")
-                if not path.is_file():
-                    raise GateError(f"source_roots 内条目必须是普通文件：{relative}")
-                if is_included(relative, include_globs):
-                    files[relative] = path
+    for relative in changed + untracked:
+        if is_excluded(relative, exclude_globs) or not is_included(relative, include_globs):
+            continue
+        path = repo_root / relative
+        try:
+            status = path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise GateError(f"无法读取候选路径：{relative}: {exc}") from exc
+        if stat.S_ISLNK(status.st_mode):
+            raise GateError(f"source_roots 内禁止未排除的文件符号链接：{relative}")
+        if not stat.S_ISREG(status.st_mode):
+            raise GateError(f"source_roots 内条目必须是普通文件：{relative}")
+        files[relative] = path
     return [files[key] for key in sorted(files)]
 
 
@@ -359,64 +394,60 @@ def resolve_baseline_commit(repo: Path, baseline_ref: str) -> str:
 def export_baseline_tree(
     repo: Path,
     baseline_commit: str,
-    source_roots: list[str],
-    include_globs: list[str],
-    exclude_globs: list[str],
+    file_keys: list[str],
     destination: Path,
 ) -> list[Path]:
+    if not file_keys:
+        return []
+    listing = subprocess.run(
+        ["git", "-C", str(repo), "ls-tree", "-z", baseline_commit, "--", *file_keys],
+        capture_output=True,
+        check=False,
+    )
+    if listing.returncode != 0:
+        raise GateError(
+            f"git ls-tree 失败（baseline={baseline_commit}）："
+            f"{os.fsdecode((listing.stderr or listing.stdout).strip())}"
+        )
     exported: dict[str, Path] = {}
-    for rel_root in source_roots:
-        (destination / rel_root).mkdir(parents=True, exist_ok=True)
-        listing = subprocess.run(
-            ["git", "-C", str(repo), "ls-tree", "-r", "-z", baseline_commit, "--", rel_root],
+    for record in listing.stdout.split(b"\0"):
+        if not record:
+            continue
+        try:
+            header, path_bytes = record.split(b"\t", 1)
+            mode, object_type, object_id = header.split(b" ", 2)
+        except ValueError as exc:
+            raise GateError(f"git ls-tree 返回无法解析的 NUL 记录：{record!r}") from exc
+        relative = os.fsdecode(path_bytes)
+        assert_repo_relative_path(relative, label="baseline tree path")
+        ordinary_blob = mode in {b"100644", b"100755"} and object_type == b"blob"
+        if not ordinary_blob:
+            raise GateError(
+                "baseline 变更路径只允许普通 blob；"
+                f"拒绝 mode={os.fsdecode(mode)} type={os.fsdecode(object_type)} "
+                f"path={relative!r}"
+            )
+        blob = subprocess.run(
+            ["git", "-C", str(repo), "cat-file", "blob", os.fsdecode(object_id)],
             capture_output=True,
             check=False,
         )
-        if listing.returncode != 0:
+        if blob.returncode != 0:
             raise GateError(
-                f"git ls-tree 失败（baseline={baseline_commit}）："
-                f"{os.fsdecode((listing.stderr or listing.stdout).strip())}"
+                f"无法读取基线 blob {os.fsdecode(object_id)} ({relative!r})："
+                f"{os.fsdecode((blob.stderr or blob.stdout).strip())}"
             )
-        for record in listing.stdout.split(b"\0"):
-            if not record:
-                continue
-            try:
-                header, path_bytes = record.split(b"\t", 1)
-                mode, object_type, object_id = header.split(b" ", 2)
-            except ValueError as exc:
-                raise GateError(f"git ls-tree 返回无法解析的 NUL 记录：{record!r}") from exc
-            relative = os.fsdecode(path_bytes)
-            assert_repo_relative_path(relative, label="baseline tree path")
-            if is_excluded(relative, exclude_globs):
-                continue
-            ordinary_blob = mode in {b"100644", b"100755"} and object_type == b"blob"
-            if not ordinary_blob:
-                raise GateError(
-                    "baseline source_roots 只允许普通 blob；"
-                    f"拒绝 mode={os.fsdecode(mode)} type={os.fsdecode(object_type)} "
-                    f"path={relative!r}"
-                )
-            if not is_included(relative, include_globs) or relative in exported:
-                continue
-            blob = subprocess.run(
-                ["git", "-C", str(repo), "cat-file", "blob", os.fsdecode(object_id)],
-                capture_output=True,
-                check=False,
-            )
-            if blob.returncode != 0:
-                raise GateError(
-                    f"无法读取基线 blob {os.fsdecode(object_id)} ({relative!r})："
-                    f"{os.fsdecode((blob.stderr or blob.stdout).strip())}"
-                )
-            output = destination / relative
-            output.parent.mkdir(parents=True, exist_ok=True)
-            output.write_bytes(blob.stdout)
-            exported[relative] = output.resolve()
+        if is_binary_blob(blob.stdout):
+            continue
+        output = destination / relative
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(blob.stdout)
+        exported[relative] = output.resolve()
     return [exported[key] for key in sorted(exported)]
 
 
 def physical_lines(contents: bytes, *, file_key: str) -> int:
-    if b"\0" in contents:
+    if is_binary_blob(contents):
         raise GateError(f"源码文件含 NUL，拒绝按物理行数度量：{file_key}")
     if not contents:
         return 0
@@ -447,6 +478,8 @@ def capture_and_measure(
         for path in sorted(files, key=lambda item: item.relative_to(root_resolved).as_posix()):
             relative = path.relative_to(root_resolved).as_posix()
             contents = read_regular_file_snapshot(path, label=f"{label} source {relative}")
+            if is_binary_blob(contents):
+                continue
             snapshot_path = destination / relative
             snapshot_path.parent.mkdir(parents=True, exist_ok=True)
             with snapshot_path.open("xb") as handle:
@@ -476,6 +509,8 @@ def source_evidence_and_sizes(
     for path in sorted(files, key=lambda item: item.relative_to(root_resolved).as_posix()):
         relative = path.relative_to(root_resolved).as_posix()
         contents = read_regular_file_snapshot(path, label=f"{label} source {relative}")
+        if is_binary_blob(contents):
+            continue
         update_source_digest(digest, relative, contents)
         sizes[relative] = physical_lines(contents, file_key=relative)
         paths.append(relative)
@@ -566,8 +601,10 @@ def run_gate(
     threshold = profile["threshold"]
     allowlist = load_allowlist_from_repo(repo, profile["allowlist_path"], threshold)
     waivers = allowlist["waivers"]
-    candidate_files = list_source_files(repo, roots, includes, excludes)
     baseline_commit = resolve_baseline_commit(repo, baseline_ref)
+    candidate_files = list_source_files(
+        repo, roots, includes, excludes, baseline_commit=baseline_commit
+    )
 
     with tempfile.TemporaryDirectory(prefix="source-file-size-snapshots-") as temporary:
         snapshot_root = Path(temporary)
@@ -577,7 +614,7 @@ def run_gate(
         candidate_evidence = {"root": str(repo.resolve()), **candidate_snapshot_evidence}
         baseline_root = snapshot_root / "baseline"
         baseline_files = export_baseline_tree(
-            repo, baseline_commit, roots, includes, excludes, baseline_root
+            repo, baseline_commit, candidate_paths, baseline_root
         )
         baseline_sizes, _, baseline_source_evidence = source_evidence_and_sizes(
             baseline_root, baseline_files, label="基线"
@@ -589,7 +626,9 @@ def run_gate(
         }
 
     try:
-        candidate_files_after = list_source_files(repo, roots, includes, excludes)
+        candidate_files_after = list_source_files(
+            repo, roots, includes, excludes, baseline_commit=baseline_commit
+        )
     except (GateError, OSError) as exc:
         raise GateError(f"候选完成前重枚举失败：{exc}") from exc
     candidate_sizes_after, candidate_paths_after, candidate_evidence_after = (

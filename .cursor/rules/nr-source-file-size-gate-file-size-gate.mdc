@@ -7,12 +7,13 @@ alwaysApply: false
 
 本 pack 面向 Python/C/C++ 等非 Swift 源码。项目显式安装后即成为映射验证的必跑项：使用已安装的默认 profile，不必再复制 `project.json`。工具缺失、未运行、无显式 `--baseline-ref`、基线无法解析、度量或 allowlist 解析失败，均不得报告验证通过。
 
-## 硬阈值（v1）
+## 硬阈值
 
-- 度量对象是仓库相对 `file_key` 的物理行数：空文件为 0；否则换行字节数加上没有结尾换行时的 1。含 NUL 的文件失败；不剥注释、不解析函数/AST，也不要求 clang。
-- 命中：新建候选 `>= threshold`，基线 `< threshold` 且候选 `>= threshold`，或基线已 `>= threshold` 而候选继续增长。`threshold` 默认值和最大值为 1000；项目可在 profile 选择 `1...1000` 的更严格单阈值，不得放宽。已超阈存量只允许持平或缩小；删除通过，重命名按旧键删除和新键创建处理。
-- 默认 profile 以仓库根为 `source_roots`，并按 include globs 匹配；检查器内置排除 `.git/` 与 `.engineering-agent-rules/`。无匹配文件视为通过，不空跑失败。项目要收紧扫描范围时，再复制为私有 `profiles/project.json`。
-- include/exclude 都以仓库相对 POSIX 路径按 `Path.match` 风格匹配。未排除的内部文件或目录符号链接失败；baseline 只接受 NUL-safe Git tree 中 `100644`/`100755` 普通 blob。
+- 只检查相对 `--baseline-ref` 的变更：`git diff` 中的已跟踪路径，加上 `git ls-files --others --exclude-standard` 的未跟踪路径。不 walk 全仓库，也不自解析 `.gitignore`；忽略规则以 git 为准。无匹配变更视为通过。
+- 度量对象是仓库相对 `file_key` 的物理行数：空文件为 0；否则换行字节数加上没有结尾换行时的 1。含 NUL 的文件视为二进制，直接排除，不度量、不因此失败。不剥注释、不解析函数/AST，也不要求 clang。
+- 命中：新建候选 `>= threshold`，基线 `< threshold` 且候选 `>= threshold`，或基线已 `>= threshold` 而候选继续增长。`threshold` 默认值和最大值为 1000；项目可在 profile 选择 `1...1000` 的更严格单阈值，不得放宽。未改动的超阈存量不在本次变更集中，不检查。删除通过，重命名按旧键删除和新键创建处理。
+- 默认 profile 以仓库根为 `source_roots`，并按 include globs 匹配；检查器内置排除 `.git/` 与 `.engineering-agent-rules/`。产物目录、依赖和中间文件归仓库 `.gitignore`。`exclude_globs` 只用于已跟踪但不属于本门禁的路径（例如 generated）。项目要收紧扫描范围时，再复制为私有 `profiles/project.json`。
+- include/exclude 都以仓库相对 POSIX 路径匹配；`**/` 前缀在仓库根也匹配零个路径段。变更集里匹配 include 的符号链接失败；baseline 只为本次变更路径读取普通 blob。
 - 禁止用切片文件做数字搬家规避阈值；职责拆分遵循 `coding-discipline` §7。
 
 ## 运行与证据
