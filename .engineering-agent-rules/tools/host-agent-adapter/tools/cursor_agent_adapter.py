@@ -97,31 +97,41 @@ class _ProgressReporter:
     def started(self, attempt: int) -> None:
         self._once("started", attempt=attempt)
 
-    def feed_stdout(self, chunk: bytes, attempt: int) -> None:
+    def feed_stdout(self, chunk: bytes, attempt: int) -> bool:
         self._pending.extend(chunk)
+        activity = False
         while True:
             newline = self._pending.find(b"\n")
             if newline < 0:
-                return
+                return activity
             line = bytes(self._pending[:newline])
             del self._pending[:newline + 1]
-            self._consume(line, attempt)
+            activity = self._consume(line, attempt) or activity
 
-    def _consume(self, line: bytes, attempt: int) -> None:
+    def _consume(self, line: bytes, attempt: int) -> bool:
         if not line.strip():
-            return
+            return False
         try:
             event = json.loads(line)
         except (UnicodeDecodeError, json.JSONDecodeError):
-            return
+            return False
         if type(event) is not dict:
-            return
+            return False
+        event_type = event.get("type")
+        if type(event_type) is not str or not event_type:
+            return False
         self._event_count += 1
+        subtype = event.get("subtype")
         if (
-            event.get("type") == "system" and event.get("subtype") == "init"
+            event_type == "system" and subtype == "init"
             and type(event.get("model")) is str and bool(event["model"].strip())
         ):
             self._once("model_receipt", attempt=attempt)
+        elif event_type == "tool_call" and subtype in {"started", "completed"}:
+            self._once(f"tool_{subtype}", attempt=attempt)
+        elif event_type in {"assistant", "result"}:
+            self._once(event_type, attempt=attempt)
+        return True
 
     def heartbeat_if_due(self, attempt: int) -> None:
         now = time.monotonic()
@@ -231,8 +241,17 @@ def parse_cursor_output(stdout: str, stderr: str) -> dict[str, Any]:
         else ""
     )
     for event in events:
-        if event.get("type") == "assistant" and type(event.get("message")) is str:
-            last_message = event["message"]
+        if event.get("type") == "assistant":
+            message = event.get("message")
+            if type(message) is str:
+                last_message = message
+            elif type(message) is dict and type(message.get("content")) is list:
+                text_parts = [
+                    item["text"] for item in message["content"]
+                    if type(item) is dict and type(item.get("text")) is str
+                ]
+                if text_parts:
+                    last_message = "".join(text_parts)
     if not last_message and terminal_result:
         last_message = terminal_result
     review_source = last_message or terminal_result or ""

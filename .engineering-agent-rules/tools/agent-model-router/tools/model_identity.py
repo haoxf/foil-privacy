@@ -7,10 +7,18 @@ import re
 
 
 RECEIPT_KEY_PATTERN = re.compile(r"[a-z0-9]{1,160}")
+CONTEXT_SIZE_PATTERN = re.compile(r"\b\d+(?:\.\d+)?\s*[km]\b", re.I)
+
+
+def _strip_context_size(value: str) -> str:
+    """Drop Cursor display-only context labels such as 1M or 272K."""
+
+    return CONTEXT_SIZE_PATTERN.sub(" ", value)
 
 
 def normalise_model_name(value: str) -> str:
-    value = re.sub(r"\b(?:cursor|current|fast|no\s*zdr|1m)\b", " ", value, flags=re.I)
+    value = _strip_context_size(value)
+    value = re.sub(r"\b(?:cursor|current|fast|no\s*zdr)\b", " ", value, flags=re.I)
     value = re.sub(
         r"\bextra[ -]?high\b|\bxhigh\b", " extra high ", value, flags=re.I,
     )
@@ -49,8 +57,9 @@ def effort_from_model_identity(model_id: str, display_name: str) -> str | None:
 def canonical_model_key(model_id: str, display_name: str) -> str:
     """Build the benchmark key, intentionally ignoring runtime variants."""
 
+    cleaned = _strip_context_size(display_name)
     cleaned = re.sub(
-        r"\b(?:cursor|fast|no\s*zdr|1m)\b|[()]", " ", display_name, flags=re.I,
+        r"\b(?:cursor|fast|no\s*zdr)\b|[()]", " ", cleaned, flags=re.I,
     )
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     effort = effort_from_model_id(model_id)
@@ -72,24 +81,23 @@ def _receipt_parts(
     effort = _display_effort(value) or fallback_effort
     flags = {
         "fast": re.search(r"\bfast\b", folded) is not None or "fast" in extra_flags,
-        "1m": re.search(r"\b1m\b", folded) is not None or "1m" in extra_flags,
         "nozdr": re.search(r"\bno\s*zdr\b", folded) is not None or "nozdr" in extra_flags,
     }
+    value = _strip_context_size(value)
     base = re.sub(
-        r"\b(?:cursor|current|fast|no\s*zdr|1m|extra[ -]?high|xhigh|max|high|medium|minimal|low|none)\b|[()]",
+        r"\b(?:cursor|current|fast|no\s*zdr|extra[ -]?high|xhigh|max|high|medium|minimal|low|none)\b|[()]",
         " ", value, flags=re.I,
     )
     key = re.sub(r"[^a-z0-9]+", "", base.casefold())
     if effort:
         key += "extrahigh" if effort in {"extra high", "xhigh"} else effort
-    return key + "".join(flag for flag in ("fast", "1m", "nozdr") if flags[flag])
+    return key + "".join(flag for flag in ("fast", "nozdr") if flags[flag])
 
 
 def _runtime_flags(value: str) -> dict[str, bool]:
     folded = value.casefold()
     return {
         "fast": re.search(r"(?:^|[-_.\s])fast(?:$|[-_.\s])", folded) is not None,
-        "1m": re.search(r"(?:^|[-_.\s])1m(?:$|[-_.\s])", folded) is not None,
         "nozdr": re.search(
             r"(?:^|[-_.\s])no[-_.\s]*zdr(?:$|[-_.\s])", folded,
         ) is not None,

@@ -91,28 +91,33 @@ class _ProgressReporter:
     def started(self, attempt: int) -> None:
         self._once("started", attempt=attempt)
 
-    def feed_stdout(self, chunk: bytes, attempt: int) -> None:
+    def feed_stdout(self, chunk: bytes, attempt: int) -> bool:
         self._pending.extend(chunk)
+        activity = False
         while True:
             newline = self._pending.find(b"\n")
             if newline < 0:
-                return
+                return activity
             line = bytes(self._pending[:newline])
             del self._pending[:newline + 1]
-            self._consume(line, attempt)
+            activity = self._consume(line, attempt) or activity
 
-    def _consume(self, line: bytes, attempt: int) -> None:
+    def _consume(self, line: bytes, attempt: int) -> bool:
         if not line.strip():
-            return
+            return False
         try:
             event = json.loads(line)
         except (UnicodeDecodeError, json.JSONDecodeError):
-            return
+            return False
         if type(event) is not dict:
-            return
+            return False
+        event_type = event.get("type")
+        if type(event_type) is not str or not event_type:
+            return False
         self._event_count += 1
-        if event.get("type") == "thread.started":
+        if event_type == "thread.started":
             self._once("thread_started", attempt=attempt)
+        return True
 
     def heartbeat_if_due(self, attempt: int) -> None:
         now = time.monotonic()

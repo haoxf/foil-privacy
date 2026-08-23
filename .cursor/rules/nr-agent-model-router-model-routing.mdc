@@ -9,6 +9,14 @@ alwaysApply: false
 
 router 的结构化候选是一次调度的唯一能力收据：adapter 与上层只原样消费候选中的模型、来源、tier、额度池和评分证据，不再各自维护模型名→能力、模型名→额度池、启用状态或 Task slug 白名单的影子表。`tier_policy.py` 是三档顺序/比较的唯一实现，adapter 与 task runtime 也直接调用它；schema enum 只是受测试约束的边界快照。family capability 由评分卡单一权威计算，router 只消费 `capability_tier` / `family_capability_score` 等结构化字段。缓存刷新、失效和候选求交全部封装在工具内；Agent 不直接读写缓存，也不手工重算结果。
 
+## 首选派发与回退
+
+router 返回 `status=ok` 且包含 `recommended` 时，调用方必须首先尝试该项的 `executor`、model 与 `receipt_key`。`alternatives` 和 `cursor_session_retries` 是 fallback-only，不是自由选择清单；不得因主观宿主限制、省事、省额度或手写模型名改选。
+
+executor 映射对称且固定：Codex 宿主的 `cursor_agent` 走 Cursor adapter；Cursor 宿主的 `codex_adapter` 走 Codex adapter；`cursor_session` 走 Cursor Task；`codex_agent` 走 Codex 本宿主角色。当前宿主的原生 Task、子 Agent 或角色列表看不到另一 provider 是正常现象，不是不可用证据；跨宿主可用性只以 router dispatch、对应 adapter preflight 和 adapter receipt 为准。
+
+只有以下结构化失败允许消费同一 router 收据中的合格 alternative/retry：adapter preflight 状态不是 `ready`；adapter 的 run/review receipt 明确 `fallback_eligible=true`；或下文 `cursor_session` 契约列出的真实 slug 拒绝/实际换模。回退保持 required tier/depth，记录失败首选的 `executor`、`receipt_key`、`status` 与 `reason`；非 fallback 错误停手上报。不得重新手写候选、降低门槛或借旁路更换 provider。
+
 ## 调用契约
 
 选择 writer 或 Reviewer 前，主 Agent 先给出：
@@ -44,7 +52,7 @@ python3 .engineering-agent-rules/tools/agent-model-router/tools/dispatch_policy.
 路由先识别宿主，再探测对方是否可调用，禁止再拉起**同一个**运行时：
 
 - Cursor 宿主产出 `cursor_session`：指定 `model_id` 的 Task / 子 Agent，**禁止** Cursor adapter（自己调自己）。这不是父会话窗口；派发见 `cursor_session` 派发。Codex 仅当全局 `codex_adapter_enabled=true` 且 `codex` CLI 可用时以 `executor=codex_adapter` 进入候选；上层走已安装 Codex adapter，不得自己发明 `codex exec`。
-- Codex 宿主产出 `codex_agent` 角色（本宿主）。Cursor adapter 仅当全局 `cursor_adapter_enabled=true` 且 `agent` CLI 可用时进入候选。
+- Codex 宿主产出 `codex_agent` 角色（本宿主）。Cursor adapter 仅当全局 `cursor_adapter_enabled=true` 且 `agent` CLI 可用时以 `executor=cursor_agent` 进入候选。
 - `unknown` 宿主禁止两个 adapter 和 Cursor 会话候选，避免误递归；Codex 仍仅在 CLI 可用时以本机 `codex_agent` 出现。
 
 `cursor_adapter_enabled=false` 只关掉 **Codex→Cursor adapter**，不删除 Cursor 宿主的会话模型，也不退出 Cursor App。`codex_adapter_enabled=false` 只关掉 **Cursor→Codex adapter**，Cursor 宿主不再推荐 `codex_adapter`。当前任务显式 `--prefer-provider` 只能覆盖 provider 偏好，不能绕过自调禁止、对方 CLI 缺失或对应 adapter 禁用。偏好值在重新启用 adapter 后恢复生效。偏好按钮不得改写两个委派开关。

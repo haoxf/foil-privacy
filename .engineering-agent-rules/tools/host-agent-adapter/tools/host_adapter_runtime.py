@@ -27,7 +27,7 @@ class ProcessProgress(Protocol):
 
     def started(self, attempt: int) -> None: ...
 
-    def feed_stdout(self, chunk: bytes, attempt: int) -> None: ...
+    def feed_stdout(self, chunk: bytes, attempt: int) -> bool: ...
 
     def heartbeat_if_due(self, attempt: int) -> None: ...
 
@@ -187,18 +187,17 @@ def run_process(
     try:
         while selector.get_map() or process.poll() is None:
             now = time.monotonic()
-            if now >= deadline:
+            events = selector.select(min(0.1, max(0.0, deadline - now)))
+            if not events and time.monotonic() >= deadline:
                 timed_out = True
                 if progress is not None:
-                    progress.process_cleanup("timeout", attempt)
+                    progress.process_cleanup("inactivity_timeout", attempt)
                 _stop_group(process)
                 try:
                     process.wait(timeout=0.5)
                 except subprocess.TimeoutExpired:
                     lingering = True
                 break
-            waits = [0.1, max(0.0, deadline - now)]
-            events = selector.select(min(waits))
             for key, _ in events:
                 file_object = key.fileobj
                 if key.data == "stdin":
@@ -229,8 +228,8 @@ def run_process(
                     close_stream(file_object)
                 elif key.data == "stdout":
                     stdout_chunks.append(chunk)
-                    if progress is not None:
-                        progress.feed_stdout(chunk, attempt)
+                    if progress is not None and progress.feed_stdout(chunk, attempt):
+                        deadline = time.monotonic() + timeout_seconds
                 else:
                     stderr_chunks.append(chunk)
             if progress is not None:
