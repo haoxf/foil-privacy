@@ -11,11 +11,13 @@ router 的结构化候选是一次调度的唯一能力收据：adapter 与上�
 
 ## 首选派发与回退
 
-router 返回 `status=ok` 且包含 `recommended` 时，调用方必须首先尝试该项的 `executor`、model 与 `receipt_key`。`alternatives` 和 `cursor_session_retries` 是 fallback-only，不是自由选择清单；不得因主观宿主限制、省事、省额度或手写模型名改选。
+router 返回 `status=ok` 且包含 `recommended` 时，调用方必须首先尝试该项的 `executor`、model 与 `receipt_key`。`alternatives`、`cursor_session_retries` 和 `adapter_retries` 是 fallback-only，不是自由选择清单；不得因主观宿主限制、省事、省额度或手写模型名改选。
 
 executor 映射对称且固定：Codex 宿主的 `cursor_agent` 走 Cursor adapter；Cursor 宿主的 `codex_adapter` 走 Codex adapter；`cursor_session` 走 Cursor Task；`codex_agent` 走 Codex 本宿主角色。当前宿主的原生 Task、子 Agent 或角色列表看不到另一 provider 是正常现象，不是不可用证据；跨宿主可用性只以 router dispatch、对应 adapter preflight 和 adapter receipt 为准。
 
 只有以下结构化失败允许消费同一 router 收据中的合格 alternative/retry：adapter preflight 状态不是 `ready`；adapter 的 run/review receipt 明确 `fallback_eligible=true`；或下文 `cursor_session` 契约列出的真实 slug 拒绝/实际换模。回退保持 required tier/depth，记录失败首选的 `executor`、`receipt_key`、`status` 与 `reason`；非 fallback 错误停手上报。不得重新手写候选、降低门槛或借旁路更换 provider。
+
+Cursor adapter 成功结束但返回 `status=model_receipt_mismatch` 时，它不是额度失败，也不是可交付候选；receipt 必须同时给出 `fallback_eligible=true`、`fallback_reason=model_identity`、`candidate_untrusted=true`。上层先核对冻结写域和 Git delta，再只按同一次 router 收据的 `adapter_retries.model_receipt_mismatch` 顺序，将其中 opaque `receipt_key` 精确解析到 `alternatives` 后重试。该序列由 router 使用本机已验证的 `cursor_family` 生成：跳过失败 family，并且每个不同 family 只保留排序最前的合格候选。调用方不得从显示名推断 family、按历史失败手选、重新 select，或把 mismatch 写成 quota；序列为空就停手上报。
 
 ## 调用契约
 
@@ -88,7 +90,7 @@ Cursor 候选在每次 `select` 都重新取 CLI 账户模型总表，再只读 
 
 Auto 是底层型号不可观测的自适应路由器，不是一个可评分的 medium 模型。Cursor Router 会读取 query、上下文、复杂度和领域，所以冻结简报须如实写风险/跨度以帮助分类；但提示词不是强制型号协议，当前 CLI 也不公开底层型号或 Intelligence/Balance/Cost 选择。router 不给它填 benchmark 或 task score，也不允许它满足任何 `--min-score`；只按保守策略给予 `policy_ceiling: medium`，用于无数值门槛的窄探索、微改或普通有界实现。strong、根因、高风险 Review 或任一显式评分门槛必须使用有评分的显式模型。将来运行时可显式选择且证明 Auto Intelligence 时再单独建策略证据，不靠提示词猜 strong。
 
-脚本随后排除未满足 tier、reasoning depth、任一最低评分、当前未开启模型或新鲜耗尽池的候选；先最小化超过要求的 reasoning depth，再在同一最低充分深度内综合用户 provider 偏好、任务适用面、各池相对账期的线性节奏、评分、平均任务成本与 fast 偏好排序。节奏与 [Cursor Usage Pace](https://github.com/kovaren/cursor-usage-pace) 相同：`pace_delta = used_percent - elapsed_percent`（负值=落后于日历）。`select` 当时用 Cursor `cycle.start/end` 或 Codex `reset_at + window_minutes` 重算 elapsed，不信任缓存里的 elapsed。落后 ≥10 个百分点的池在 auto 下优先于跟上/超前的池（从而压过默认的 Cursor `_base_rank`），覆盖 `cursor_first_party`、`cursor_api`、`codex_main`、`codex_spark` 及额外 Codex 池；同一档内再用 `pace_delta` 微调。显式 `--prefer-provider` 与推理深度仍在节奏之前。没有同深度合格偏好候选时回退并给出机器原因。冻结窄探索/微改在无数值门槛时优先独立 Spark 池；`codex_main` 在主池超前消耗时自然后移，但 required tier 和 reasoning depth 永不降级。固定 Codex 角色的 tier 来自受限角色契约；同型号/推理档位若能唯一对应第二层评分卡，可额外满足调用方显式指定的逐维最低值，但公开总分不反向改写该角色 tier。型号或档位无法唯一映射时仍按未评分角色处理。返回 `recommended`、最多四个 `alternatives`、`preference` 收据、深度证据、启用模型证据、评分/额度新鲜度和最小 pool facts（含 `pace_class`）；上层不读写缓存文件。
+脚本随后排除未满足 tier、reasoning depth、任一最低评分、当前未开启模型或新鲜耗尽池的候选；先最小化超过要求的 reasoning depth，再在同一最低充分深度内综合用户 provider 偏好、任务适用面、各池相对账期的线性节奏、评分、平均任务成本与 fast 偏好排序。节奏与 [Cursor Usage Pace](https://github.com/kovaren/cursor-usage-pace) 相同：`pace_delta = used_percent - elapsed_percent`（负值=落后于日历）。`select` 当时用 Cursor `cycle.start/end` 或 Codex `reset_at + window_minutes` 重算 elapsed，不信任缓存里的 elapsed。落后 ≥10 个百分点的池在 auto 下优先于跟上/超前的池（从而压过默认的 Cursor `_base_rank`），覆盖 `cursor_first_party`、`cursor_api`、`codex_main`、`codex_spark` 及额外 Codex 池；同一档内再用 `pace_delta` 微调。显式 `--prefer-provider` 与推理深度仍在节奏之前。没有同深度合格偏好候选时回退并给出机器原因。冻结窄探索/微改在无数值门槛时优先独立 Spark 池；`codex_main` 在主池超前消耗时自然后移，但 required tier 和 reasoning depth 永不降级。固定 Codex 角色的 tier 来自受限角色契约；同型号/推理档位若能唯一对应第二层评分卡，可额外满足调用方显式指定的逐维最低值，但公开总分不反向改写该角色 tier。型号或档位无法唯一映射时仍按未评分角色处理。返回 `recommended`、最多四个 `alternatives`、`preference` 收据、结构化 retry、深度证据、启用模型证据、评分/额度新鲜度和最小 pool facts（含 `pace_class`）；上层不读写缓存文件。
 
 ## cursor_session 派发
 

@@ -31,7 +31,7 @@ run --repo ROOT --allowed-write-path PATH --required-tier weak|medium|strong
     --model MODEL --model-source auto|third_party|cursor_native
 ```
 
-wrapper 启动前再次读取 `dispatch-policy.json`；禁用或策略损坏时不启动。允许时使用 `--print --force --trust --sandbox enabled --output-format stream-json`。`--allowed-write-path` 只写入简报，不当硬门禁。prompt 不进 argv、stdout 或 receipt。stdout 始终只输出一份最终 JSON receipt；长任务仅向 stderr 立即 flush 固定形态、脱敏的阶段/事件计数与 heartbeat，不透传 prompt、模型正文、工具参数、模型名、路径、diff 或原始 stream。run/review 的 `--timeout-seconds` 是无有效 JSONL 事件的连续静默上限，不是总墙钟上限；有效事件持续到达就续期，preflight 仍用绝对短超时。system init 形成 model receipt；核对失败时 `model_receipt_mismatch`。成功终态返回 `candidate_ready` 和 `upper_review_required: true`。
+wrapper 启动前再次读取 `dispatch-policy.json`；禁用或策略损坏时不启动。允许时使用 `--print --force --trust --sandbox enabled --output-format stream-json`。`--allowed-write-path` 只写入简报，不当硬门禁。prompt 不进 argv、stdout 或 receipt。stdout 始终只输出一份最终 JSON receipt；长任务仅向 stderr 立即 flush 固定形态、脱敏的阶段/事件计数与 heartbeat，不透传 prompt、模型正文、工具参数、模型名、路径、diff 或原始 stream。run/review 的 `--timeout-seconds` 是无有效 JSONL 事件的连续静默上限，不是总墙钟上限；有效事件持续到达就续期，preflight 仍用绝对短超时。system init 形成 model receipt；成功结束但核对失败时返回 `model_receipt_mismatch`、`fallback_eligible=true`、`fallback_reason=model_identity` 和 `candidate_untrusted=true`，不冒充额度失败或可交付候选。身份匹配的成功终态才返回 `candidate_ready` 和 `upper_review_required: true`。
 
 ## 显式只读 Review
 
@@ -46,4 +46,4 @@ review --repo ROOT --required-tier … --assessed-tier …
 
 ## 额度错误与回退
 
-只有 `preflight` 非 `ready` 或 run/review receipt 明确 `fallback_eligible=true` 才可按同一 router 收据回退；非 fallback 错误停手上报。回退记录首选 `executor`、`receipt_key`、`status/reason`，保持 tier/depth，不手写模型或按宿主列表改选。真实 Cursor quota/rate-limit 在返回收据前调用 `report-limit`。ChatGPT/账户不支持该模型只淘汰该候选。adapter 不保存 task-local mode、handoff 或历史。
+只有 `preflight` 非 `ready` 或 run/review receipt 明确 `fallback_eligible=true` 才可按同一 router 收据回退；非 fallback 错误停手上报。一般回退记录首选 `executor`、`receipt_key`、`status/reason`，保持 tier/depth，不手写模型或按宿主列表改选。`model_receipt_mismatch` 可能已经产生 delta：上层先核对冻结写域和 Git delta，再只消费 router 收据的 `adapter_retries.model_receipt_mismatch`；不得按模型名自行跳过 family，序列为空就停手。真实 Cursor quota/rate-limit 在返回收据前调用 `report-limit`。ChatGPT/账户不支持该模型只淘汰该候选。adapter 不保存 task-local mode、handoff 或历史。

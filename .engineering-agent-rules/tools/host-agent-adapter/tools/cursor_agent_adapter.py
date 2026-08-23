@@ -242,6 +242,7 @@ def _receipt(**values: Any) -> dict[str, Any]:
         "requested_model": None, "model_source": None, "model_receipt": None,
         "last_agent_message": None, "git_status": None,
         "fallback_eligible": False, "fallback_reason": None, "stderr_summary": "",
+        "candidate_untrusted": False,
         "quota_pool_id": None, "quota_cache_invalidated": False,
     }
     base.update(values)
@@ -426,7 +427,7 @@ def run_cursor(
         status = "fallback_before_write"
     elif parsed["success"] and not identity_matches:
         status = "model_receipt_mismatch"
-        reason = None
+        reason = "model_identity"
     elif parsed["success"] and not model_receipt["sufficient"]:
         status = "insufficient_model_capability"
         reason = None
@@ -458,8 +459,9 @@ def run_cursor(
         model_receipt=model_receipt,
         last_agent_message=parsed["last_agent_message"],
         git_status=_RUNTIME.git_status_facts(repo_path),
-        fallback_eligible=status == "fallback_before_write",
+        fallback_eligible=status in {"fallback_before_write", "model_receipt_mismatch"},
         fallback_reason=reason,
+        candidate_untrusted=status == "model_receipt_mismatch",
         quota_pool_id=quota_pool_id,
         quota_cache_invalidated=quota_cache_invalidated,
         dispatch_policy=policy,

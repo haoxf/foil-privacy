@@ -157,3 +157,32 @@ def filter_enabled_cli_models(
         if family is not None and family in enabled:
             result.append({**model, "cursor_family": family})
     return result
+
+
+def adapter_identity_retries(
+    recommended: dict[str, Any] | None,
+    alternatives: list[dict[str, Any]],
+) -> list[str]:
+    """Return one opaque adapter retry key per different Cursor family."""
+    if recommended is None or recommended.get("executor") != "cursor_agent":
+        return []
+    baseline_family = recommended.get("cursor_family")
+    if type(baseline_family) is not str or not baseline_family:
+        return []
+    seen_families = {baseline_family}
+    retries: list[str] = []
+    for item in alternatives:
+        family = item.get("cursor_family")
+        receipt_key = item.get("receipt_key")
+        if (
+            item.get("executor") != "cursor_agent"
+            or type(family) is not str
+            or not family
+            or family in seen_families
+            or type(receipt_key) is not str
+            or not receipt_key
+        ):
+            continue
+        seen_families.add(family)
+        retries.append(receipt_key)
+    return retries

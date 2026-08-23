@@ -452,6 +452,7 @@ def _cursor_candidates(
                 "display_name": live["display_name"],
                 "model_source": live["model_source"],
                 "receipt_key": live["receipt_key"],
+                "cursor_family": live.get("cursor_family"),
                 "pool_id": pool_id,
                 "tier": capability_tier,
                 "family_capability_score": float(family_capability_score),
@@ -775,12 +776,9 @@ def recommend(
     )
     recommended = eligible[0] if eligible else None
     alternatives = eligible[1:5]
-    session_retries = cursor_session_retries(recommended, alternatives)
-    recommended_provider = (
-        "codex"
-        if recommended and recommended["executor"] in host_policy.CODEX_EXECUTORS
-        else "cursor" if recommended else None
-    )
+    recommended_provider = "codex" if (
+        recommended and recommended["executor"] in host_policy.CODEX_EXECUTORS
+    ) else "cursor" if recommended else None
     preference_honored = (
         None
         if preferred_provider == "auto"
@@ -800,7 +798,9 @@ def recommend(
         },
         "recommended": recommended,
         "alternatives": alternatives,
-        "cursor_session_retries": session_retries,
+        "cursor_session_retries": cursor_session_retries(recommended, alternatives),
+        "adapter_retries": {"model_receipt_mismatch":
+            cursor_model_selection.adapter_identity_retries(recommended, alternatives)},
         "evidence": {
             "scorecard": scorecard.get("cache", {}),
             "cursor_quota": cursor_quota.get("cache", {}),
