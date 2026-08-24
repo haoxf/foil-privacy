@@ -1,0 +1,10 @@
+{
+  "preset": null,
+  "requested_packs": [
+    "codex-agent-team",
+    "host-agent-adapter",
+    "source-file-size-gate"
+  ],
+  "schema_version": 1,
+  "source_repository": "https://github.com/haoxf/engineering-agent-rules.git"
+}

@@ -1,5 +1,6 @@
-# 项目 Agent 指令
+---
+description: 共享规则入口
+alwaysApply: true
+---
 
-<!-- rulesctl:managed:start -->
 不要在本仓查找 `nr-*`。先读 `.agent-rules.json`，再打开 `$HOME/.config/engineering-agent-rules/current/indexes/<preset>.md`；`preset` 为空时打开 `all.md`，并只读其中由 `requested_packs` 展开的规则。共享规则、工具、模板、Skill 与 Codex Agent 均从 `current` 下同名路径读取，cwd 仍是本仓。若 `current` 缺失，停手并让用户在规则源仓运行 `python3 scripts/rulesctl sync-cache`。
-<!-- rulesctl:managed:end -->
